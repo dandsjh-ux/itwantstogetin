@@ -427,3 +427,54 @@ export function scareImage() {
   grain(g, W, H, 0.12);
   return c.toDataURL('image/jpeg', 0.85);
 }
+
+// Corner cobweb: threads fanning down from the top centre with a sagging spiral, transparent background
+export function cobweb() {
+  if (cache.has('cobweb')) return cache.get('cobweb');
+  const W = 256, H = 184;
+  const [c, g] = canvas(W, H);
+  g.strokeStyle = 'rgba(225,225,225,0.6)'; g.lineWidth = 1;
+  const ox = W / 2, oy = 0, spokes = 11;
+  const ang = (i) => 0.08 * Math.PI + (i / (spokes - 1)) * 0.84 * Math.PI;
+  for (let i = 0; i < spokes; i++) { g.beginPath(); g.moveTo(ox, oy); g.lineTo(ox + Math.cos(ang(i)) * W, oy + Math.sin(ang(i)) * W); g.stroke(); }
+  for (let r = 14; r < H * 1.1; r += 11 + rnd() * 9) {
+    g.beginPath();
+    for (let i = 0; i < spokes; i++) {
+      const rr = r * (0.9 + rnd() * 0.15);
+      const x = ox + Math.cos(ang(i)) * rr, y = oy + Math.sin(ang(i)) * rr;
+      if (i === 0) g.moveTo(x, y);
+      else { const mid = (ang(i - 1) + ang(i)) / 2; g.quadraticCurveTo(ox + Math.cos(mid) * rr * 0.84, oy + Math.sin(mid) * rr * 0.84, x, y); }
+    }
+    g.globalAlpha = 0.3 + rnd() * 0.45; g.stroke(); g.globalAlpha = 1;
+  }
+  // a few broken, drooping strands
+  for (let i = 0; i < 6; i++) { g.beginPath(); const x = rnd() * W; g.moveTo(x, rnd() * H * 0.4); g.quadraticCurveTo(x + 10, H * 0.7, x + (rnd() - 0.5) * 30, H); g.globalAlpha = 0.3; g.stroke(); g.globalAlpha = 1; }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  cache.set('cobweb', t);
+  return t;
+}
+
+// Moonlight shaft: bright at the window end, fading along its length and at the edges
+export function shaft() {
+  if (cache.has('shaft')) return cache.get('shaft');
+  const [c, g] = canvas(64, 256);
+  const gl = g.createLinearGradient(0, 0, 0, 256);
+  gl.addColorStop(0, 'rgba(170,195,255,0.9)'); gl.addColorStop(0.5, 'rgba(140,170,240,0.35)'); gl.addColorStop(1, 'rgba(120,150,220,0)');
+  g.fillStyle = gl; g.fillRect(0, 0, 64, 256);
+  const ge = g.createLinearGradient(0, 0, 64, 0);
+  ge.addColorStop(0, 'rgba(0,0,0,1)'); ge.addColorStop(0.25, 'rgba(0,0,0,0)'); ge.addColorStop(0.75, 'rgba(0,0,0,0)'); ge.addColorStop(1, 'rgba(0,0,0,1)');
+  g.globalCompositeOperation = 'destination-out'; g.fillStyle = ge; g.fillRect(0, 0, 64, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  cache.set('shaft', t);
+  return t;
+}
+
+// Tileable film-grain image for the CSS overlay
+export function grainDataURL() {
+  const S = 160;
+  const [c, g] = canvas(S, S);
+  const id = g.createImageData(S, S);
+  for (let i = 0; i < id.data.length; i += 4) { const v = Math.random() * 255; id.data[i] = id.data[i + 1] = id.data[i + 2] = v; id.data[i + 3] = 255; }
+  g.putImageData(id, 0, 0);
+  return c.toDataURL('image/png');
+}

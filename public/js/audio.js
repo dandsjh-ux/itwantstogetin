@@ -1,28 +1,33 @@
 // Audio: user-supplied MP3s (public/audio) for music & cues, plus procedural Web Audio SFX.
-// Files are matched to roles by filename keywords, or by public/audio/manifest.json.
+// Files are assigned to roles by public/audio/manifest.json (with optional clip start/end times),
+// or failing that by keywords in their filenames.
 
 const ROLE_PATTERNS = [
-  ['breach', /(chase|breach|hunt|danger|intense|panic|run)/],
+  ['running', /(running|chase.?step)/],
+  ['footsteps', /(footstep|steps|walking)/],
+  ['crying', /(cry|crying|sob|weep)/],
+  ['singing', /(sing|singing|lullaby|hum|nursery)/],
+  ['glass', /(glass|shatter|smash)/],
+  ['breach', /(chase|breach|hunt|danger|intense|panic)/],
   ['win', /(win|victory|dawn|safe|success|relief)/],
   ['lose', /(lose|lost|game.?over|death|dead|fail|ending)/],
   ['menu', /(menu|title|start|intro|theme|main)/],
   ['game', /(ambien|background|bgm|game|loop|house|music|drone|atmos|tension)/],
   ['knock', /(knock|door|bang)/],
   ['scream', /(scream|shriek|jump|scare|sting)/],
-  ['whisper', /(whisper|voice|breath|laugh|giggle|hum|sing|lullaby)/],
+  ['whisper', /(whisper|voice|breath|laugh|giggle)/],
   ['cue', /(alert|cue|warning|bell|chime|alarm|notify|ding)/],
 ];
-const MUSIC_ROLES = ['menu', 'game', 'breach', 'win', 'lose'];
-const SHORT_ROLES = ['knock', 'scream', 'whisper', 'cue', 'stinger'];
+const MUSIC_ROLES = ['menu', 'game', 'breach', 'win', 'lose', 'extra_music'];
 
 export class AudioSys {
   constructor() {
     this.ctx = null;
     this.musicVol = 0.55;
     this.sfxVol = 0.85;
-    this.roles = {};      // role -> [url]
+    this.roles = {};      // role -> [{ url, start, end, vol, filter }]
     this.buffers = {};    // url -> AudioBuffer
-    this.music = null;    // { role, el | proc }
+    this.music = null;    // { role, el, gain } | { role, proc }
     this.loops = new Map();
     this.ready = false;
   }
@@ -37,6 +42,9 @@ export class AudioSys {
     this.master.connect(ctx.destination);
     this.sfxGain = ctx.createGain(); this.sfxGain.gain.value = this.sfxVol; this.sfxGain.connect(this.master);
     this.musicGain = ctx.createGain(); this.musicGain.gain.value = this.musicVol; this.musicGain.connect(this.master);
+    // Music runs through a low-pass filter so it can be muffled (title screen, quizzes)
+    this.musicFilter = ctx.createBiquadFilter(); this.musicFilter.type = 'lowpass'; this.musicFilter.frequency.value = 20000;
+    this.musicFilter.connect(this.musicGain);
     this.reverb = ctx.createConvolver(); this.reverb.buffer = this._impulse(2.8, 2.2);
     this.revGain = ctx.createGain(); this.revGain.gain.value = 0.35;
     this.reverb.connect(this.revGain); this.revGain.connect(this.sfxGain);
@@ -63,40 +71,47 @@ export class AudioSys {
     try { data = await (await fetch('/api/audio')).json(); } catch { return; }
     const files = data.files || [];
     const roles = {};
-    const add = (r, f) => (roles[r] = roles[r] || []).push('audio/' + encodeURIComponent(f));
+    const url = (f) => 'audio/' + encodeURIComponent(f);
+    const add = (r, clip) => (roles[r] = roles[r] || []).push(clip);
     const mf = data.manifest || {};
     const assigned = new Set();
     for (const [role, v] of Object.entries(mf)) {
-      for (const f of [].concat(v)) { if (files.includes(f)) { add(role, f); assigned.add(f); } }
+      if (role.startsWith('_')) continue;
+      for (const entry of [].concat(v)) {
+        const c = typeof entry === 'string' ? { file: entry } : entry;
+        if (!files.includes(c.file)) continue;
+        add(role, { url: url(c.file), start: c.start || 0, end: c.end, vol: c.vol ?? 1, filter: c.filter });
+        assigned.add(c.file);
+      }
     }
     const unmatched = [];
     for (const f of files) {
       if (assigned.has(f)) continue;
-      const n = f.toLowerCase();
-      const hit = ROLE_PATTERNS.find(([, re]) => re.test(n));
-      if (hit) add(hit[0], f); else unmatched.push(f);
+      const hit = ROLE_PATTERNS.find(([, re]) => re.test(f.toLowerCase()));
+      if (hit) add(hit[0], { url: url(f), start: 0, vol: 1 }); else unmatched.push(f);
     }
     // Unmatched files: long ones become music, short ones become tension stingers
     await Promise.all(unmatched.map((f) => new Promise((res) => {
-      const a = new Audio(); a.preload = 'metadata'; a.src = 'audio/' + encodeURIComponent(f);
-      const done = () => { add(a.duration > 40 ? 'extra_music' : 'stinger', f); res(); };
+      const a = new Audio(); a.preload = 'metadata'; a.src = url(f);
+      const done = () => { add(a.duration > 40 ? 'extra_music' : 'stinger', { url: url(f), start: 0, vol: 1 }); res(); };
       a.onloadedmetadata = done; a.onerror = res; setTimeout(res, 6000);
     })));
-    // Fill missing music roles from spare long tracks
     const spare = [...(roles.extra_music || [])];
-    for (const r of ['game', 'menu', 'breach']) if (!roles[r] && spare.length) roles[r] = [spare.shift()];
+    for (const r of ['game', 'menu']) if (!roles[r] && spare.length) roles[r] = [spare.shift()];
     if (spare.length) roles.game = [...(roles.game || []), ...spare];
     this.roles = roles;
-    // Decode short cues so they can be positioned in 3D
-    for (const r of SHORT_ROLES) for (const url of roles[r] || []) this._decode(url);
+    // Decode short clips so they can be positioned in 3D
+    const toDecode = new Set();
+    for (const [r, clips] of Object.entries(roles)) if (!MUSIC_ROLES.includes(r)) for (const c of clips) toDecode.add(c.url);
+    for (const u of toDecode) this._decode(u);
     if (this.music && !this.music.el) this.playMusic(this.music.role, true);
-    console.log('[audio] roles', roles);
+    console.log('[audio] roles', Object.fromEntries(Object.entries(roles).map(([k, v]) => [k, v.length])));
   }
 
-  async _decode(url) {
+  async _decode(u) {
     try {
-      const ab = await (await fetch(url)).arrayBuffer();
-      this.buffers[url] = await this.ctx.decodeAudioData(ab);
+      const ab = await (await fetch(u)).arrayBuffer();
+      this.buffers[u] = await this.ctx.decodeAudioData(ab);
     } catch (e) { /* ignore */ }
   }
 
@@ -105,7 +120,13 @@ export class AudioSys {
     if (!this.ctx) return;
     this.musicGain.gain.setTargetAtTime(music, this.ctx.currentTime, 0.1);
     this.sfxGain.gain.setTargetAtTime(sfx, this.ctx.currentTime, 0.1);
-    if (this.music?.el) this.music.el.volume = Math.min(1, music);
+  }
+
+  // Muffle the music (e.g. while concentrating on a quiz). freq in Hz, or null to open up.
+  muffle(freq) {
+    if (!this.ctx) return;
+    const base = this.music?.clip?.filter || 20000;
+    this.musicFilter.frequency.setTargetAtTime(Math.min(base, freq || 20000), this.ctx.currentTime, 0.4);
   }
 
   // ------------------------------------------------------------------ music
@@ -113,17 +134,21 @@ export class AudioSys {
     if (!this.ctx) return;
     if (!force && this.music && this.music.role === role) return;
     this.stopMusic(1.5);
-    const urls = this.roles[role];
-    if (urls && urls.length) {
-      const el = new Audio(urls[Math.floor(Math.random() * urls.length)]);
+    const clips = this.roles[role];
+    if (clips && clips.length) {
+      const clip = clips[Math.floor(Math.random() * clips.length)];
+      const el = new Audio(clip.url);
       el.loop = !(role === 'win' || role === 'lose');
-      el.volume = 0;
+      el.preload = 'auto';
+      const gain = this.ctx.createGain(); gain.gain.value = 0; gain.connect(this.musicFilter);
+      try { this.ctx.createMediaElementSource(el).connect(gain); } catch { el.volume = Math.min(1, this.musicVol); }
+      if (clip.start) el.addEventListener('loadedmetadata', () => { el.currentTime = Math.min(clip.start, Math.max(0, el.duration - 5)); }, { once: true });
       el.play().catch(() => {});
-      const target = Math.min(1, this.musicVol);
-      let v = 0;
-      const iv = setInterval(() => { v = Math.min(target, v + 0.05); el.volume = v; if (v >= target) clearInterval(iv); }, 80);
-      this.music = { role, el, iv };
+      gain.gain.setTargetAtTime(clip.vol ?? 1, this.ctx.currentTime, 0.8);
+      this.musicFilter.frequency.setTargetAtTime(clip.filter || 20000, this.ctx.currentTime, 0.5);
+      this.music = { role, el, gain, clip };
     } else {
+      this.musicFilter.frequency.setTargetAtTime(20000, this.ctx.currentTime, 0.3);
       this.music = { role, proc: this._procMusic(role) };
     }
   }
@@ -133,9 +158,8 @@ export class AudioSys {
     this.music = null;
     if (!m) return;
     if (m.el) {
-      clearInterval(m.iv);
-      const el = m.el; let v = el.volume;
-      const iv = setInterval(() => { v -= 0.05; if (v <= 0) { el.pause(); clearInterval(iv); } else el.volume = v; }, (fade * 1000) / 20);
+      m.gain.gain.setTargetAtTime(0, this.ctx.currentTime, fade / 3);
+      setTimeout(() => { m.el.pause(); m.el.src = ''; m.gain.disconnect(); }, fade * 1000 + 600);
     } else if (m.proc) m.proc.stop(fade);
   }
 
@@ -145,17 +169,12 @@ export class AudioSys {
     this.musicGain.gain.cancelScheduledValues(t);
     this.musicGain.gain.setTargetAtTime(this.musicVol * amount, t, 0.05);
     this.musicGain.gain.setTargetAtTime(this.musicVol, t + sec, 0.8);
-    if (this.music?.el) {
-      const el = this.music.el;
-      el.volume = Math.min(1, this.musicVol * amount);
-      setTimeout(() => { if (this.music?.el === el) el.volume = Math.min(1, this.musicVol); }, sec * 1000);
-    }
   }
 
   // Procedural fallback music
   _procMusic(role) {
     const ctx = this.ctx, out = ctx.createGain();
-    out.gain.value = 0; out.connect(this.musicGain);
+    out.gain.value = 0; out.connect(this.musicFilter);
     out.gain.setTargetAtTime(1, ctx.currentTime, 1.0);
     const nodes = [];
     let timer = null;
@@ -257,22 +276,34 @@ export class AudioSys {
   }
 
   _noiseSrc(t, dur) {
-    const n = this.ctx.createBufferSource(); n.buffer = this.noise;
+    const n = this.ctx.createBufferSource(); n.buffer = this.noise; n.loop = true;
     n.start(t, Math.random() * 1.5, dur + 0.05);
     return n;
   }
 
-  _file(role, opts) {
-    const urls = (this.roles[role] || []).filter((u) => this.buffers[u]);
-    if (!urls.length) return false;
-    const buf = this.buffers[urls[Math.floor(Math.random() * urls.length)]];
-    const s = this.ctx.createBufferSource(); s.buffer = buf;
+  // Play one of the user's clips for a role. opts.window: play only that many seconds from a random point.
+  _file(role, opts = {}) {
+    const clips = (this.roles[role] || []).filter((c) => this.buffers[c.url]);
+    if (!clips.length) return false;
+    const c = clips[Math.floor(Math.random() * clips.length)];
+    const buf = this.buffers[c.url];
+    let start = c.start || 0, end = Math.min(c.end ?? buf.duration, buf.duration);
+    if (opts.window && end - start > opts.window) { start += Math.random() * (end - start - opts.window); end = start + opts.window; }
+    const dur = Math.max(0.05, end - start);
+    const ctx = this.ctx, t = ctx.currentTime;
+    const s = ctx.createBufferSource(); s.buffer = buf;
     s.playbackRate.value = opts.rate || 1;
-    s.connect(this._out(opts)); s.start();
+    const env = ctx.createGain();
+    const v = c.vol ?? 1;
+    env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(v, t + 0.015);
+    env.gain.setValueAtTime(v, t + Math.max(0.02, dur / (opts.rate || 1) - 0.25));
+    env.gain.linearRampToValueAtTime(0, t + dur / (opts.rate || 1));
+    s.connect(env); env.connect(this._out(opts));
+    s.start(t, start, dur);
     return true;
   }
 
-  hasFile(role) { return (this.roles[role] || []).some((u) => this.buffers[u]); }
+  hasFile(role) { return (this.roles[role] || []).some((c) => this.buffers[c.url]); }
 
   play(name, opts = {}) {
     if (!this.ready) return;
@@ -282,7 +313,7 @@ export class AudioSys {
 
   // ------------------------------------------------------------------ procedural SFX
   s_knock(o) {
-    if (o.file !== false && Math.random() < 0.5 && this._file('knock', o)) return;
+    if (o.file !== false && (o.file === true || Math.random() < 0.7) && this._file('knock', o)) return;
     const ctx = this.ctx, out = this._out({ ...o, wet: 0.8 });
     const n = o.count || 3, gap = o.gap || 0.28;
     for (let i = 0; i < n; i++) {
@@ -338,7 +369,7 @@ export class AudioSys {
   }
 
   s_whisper(o) {
-    if (o.file !== false && Math.random() < 0.6 && this._file('whisper', o)) return;
+    if (o.file !== false && (o.file === true || Math.random() < 0.75) && this._file('whisper', o)) return;
     const ctx = this.ctx, out = this._out({ ...o, wet: 0.9 }), t = ctx.currentTime, d = o.dur || 1.8;
     const s = this._noiseSrc(t, d);
     const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 6;
@@ -515,6 +546,7 @@ export class AudioSys {
   }
 
   s_glass(o) {
+    if (o.file !== false && this._file('glass', { ...o, wet: 0.5 })) { this.s_rumble({ ...o, dur: 0.8, vol: (o.vol || 1) * 0.6 }); return; }
     const ctx = this.ctx, out = this._out({ ...o, wet: 0.7 }), t = ctx.currentTime;
     for (let i = 0; i < 12; i++) {
       const tt = t + Math.random() * 0.5;
@@ -523,6 +555,29 @@ export class AudioSys {
       os.connect(g); g.connect(out); os.start(tt); os.stop(tt + 0.22);
     }
     this.s_bang(o);
+  }
+
+  // User clips with procedural fallbacks
+  s_crying(o) { if (!this._file('crying', { ...o, wet: o.wet ?? 0.8 })) this.s_whisper({ ...o, file: false, dur: 2.5 }); }
+  s_singing(o) { if (!this._file('singing', { ...o, wet: o.wet ?? 0.8 })) this.s_whisper({ ...o, file: false, dur: 2.5 }); }
+  s_footsteps(o) {
+    if (this._file('footsteps', { ...o, window: o.window || 6, wet: 0.5 })) return;
+    let i = 0;
+    const iv = setInterval(() => { this.s_step({ ...o, creaky: true }); if (++i > 6) clearInterval(iv); }, 520);
+  }
+  s_running(o) {
+    if (this._file('running', { ...o, wet: 0.4 })) return;
+    let i = 0;
+    const iv = setInterval(() => { this.s_step({ ...o, vol: (o.vol || 1) * 0.8 }); if (++i > 8) clearInterval(iv); }, 230);
+  }
+  s_thunder(o) {
+    const ctx = this.ctx, out = this._out({ ...o, wet: 1 }), t = ctx.currentTime, d = o.dur || 4;
+    const s = this._noiseSrc(t, Math.min(1.9, d));
+    const s2 = this._noiseSrc(t + 1.8, d - 1.8);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(900, t); lp.frequency.exponentialRampToValueAtTime(120, t + d);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(1.3, t + 0.08); g.gain.exponentialRampToValueAtTime(0.4, t + 0.8);
+    g.gain.linearRampToValueAtTime(0.9, t + 1.4); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    s.connect(lp); s2.connect(lp); lp.connect(g); g.connect(out);
   }
 
   // Looping positional bed (e.g. wind at a broken window). Returns stop function.

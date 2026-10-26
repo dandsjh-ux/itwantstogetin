@@ -4,6 +4,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   FLOORS, WALLS, STAIRS, FLOOR_HOLES, ENTRANCES, FURNITURE, FURN_SIZES, furnitureBox, PORTRAITS, WRITINGS, NOTES,
   SALT_CIRCLES, PLAYER_R, groundAt, roomAt, entranceAnchor, entranceInteractPoint, INTERACT_RANGE, POWERUP_TYPES,
+  LADDERS, DOORWAYS, ROOMS,
 } from './layout.js';
 import * as TX from './textures.js';
 import { audio } from './audio.js';
@@ -14,6 +15,20 @@ const WALK = 3.3, RUN = 5.2;
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand = (a, b) => a + Math.random() * (b - a);
+const floorOfY = (y) => FLOORS.reduce((best, F) => (y >= F.y - 0.01 ? F.id : best), 0);
+const FOG = [0x040705, 0x030406, 0x040409, 0x05060c];
+
+// Organic flicker: holds a random level for 50-140 ms and eases towards it, so lights waver
+// instead of strobing frame by frame.
+class Flick {
+  constructor() { this.v = 1; this.target = 1; this.t = 0; }
+  step(dt, amount, rate = 1) {
+    this.t -= dt * rate;
+    if (this.t <= 0) { this.t = rand(0.05, 0.14); this.target = 1 - Math.random() * amount; }
+    this.v += (this.target - this.v) * Math.min(1, dt * 22);
+    return this.v;
+  }
+}
 
 // Box geometry with UVs in world units (1 tile = `tile` metres)
 function boxGeo(w, h, d, tile = 1.6) {
@@ -29,18 +44,34 @@ function boxGeo(w, h, d, tile = 1.6) {
 
 export class Game3D {
   constructor(root, controls, hooks) {
-    this.root = root; this.controls = controls; this.hooks = hooks;
+    this.root = root; this.controls = controls; this.hooks = hooks || {};
+    this.quality = this.hooks.quality || (isTouch ? 'low' : 'high');
     this.renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, isTouch ? 1.25 : 1.5));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, this.quality === 'high' ? 1.5 : 1.1));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.autoClear = false;
     root.appendChild(this.renderer.domElement);
     this.canvas = this.renderer.domElement;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x020306);
-    this.scene.fog = new THREE.FogExp2(0x020305, 0.055);
-    this.camera = new THREE.PerspectiveCamera(72, 1, 0.05, 90);
+    this.scene.background = new THREE.Color(FOG[1]);
+    this.scene.fog = new THREE.FogExp2(FOG[1], 0.055);
+    this.camera = new THREE.PerspectiveCamera(72, 1, 0.06, 70);
     this.scene.add(this.camera);
+    // First-person hand and torch live in their own little scene, drawn on top
+    this.vmScene = new THREE.Scene();
+    this.vmCamera = new THREE.PerspectiveCamera(58, 1, 0.01, 5);
+    this.vmScene.add(new THREE.AmbientLight(0x8090a8, 0.16));
+    this.vmLight = new THREE.DirectionalLight(0xffe2b8, 0.9); this.vmLight.position.set(-0.4, 0.6, 0.5); this.vmScene.add(this.vmLight);
+    this.torchFlick = new Flick(); this.globalFlick = new Flick();
+    this.entityDim = 1; this.entityPhase = 2; this.entityHidden = 0; this.entityStepT = 0;
+    this.lightT = rand(30, 60); this.lightTime = -1; this.flash = 0;
+    this.backdrops = []; this.shafts = [];
+    this.frustum = new THREE.Frustum(); this._pm = new THREE.Matrix4();
+    this.staticGeos = new Map();
+    this.climb = null;
     this.clock = new THREE.Clock();
     this.time = 0;
     this.player = { x: 0, y: 0, z: 0, f: 1, yaw: 0, pitch: 0, vy: 0, eye: EYE, stepAcc: 0, bob: 0 };
@@ -64,8 +95,28 @@ export class Game3D {
     this.mats = this._materials();
     this._lights();
     this._build();
-    addEventListener('resize', () => this.resize());
+    this._buildViewModel('#888888');
+    this.setQuality(this.quality);
     this.resize();
+    this._precompile();
+    addEventListener('resize', () => this.resize());
+  }
+
+  setQuality(q) {
+    this.quality = q;
+    this.torch.castShadow = q === 'high';
+    if (this.dust) this.dust.visible = q === 'high';
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, q === 'high' ? 1.5 : 1.1));
+    this.resize();
+  }
+
+  // Compile every shader we'll need up front so nothing stutters when the first attack appears
+  _precompile() {
+    const tmp = [this.makeWoman(), this.makeHand(), this.makeSilhouette(), new THREE.Mesh(boxGeo(1, 0.1, 0.1, 1), this.mats.plank)];
+    for (const t of tmp) this.scene.add(t);
+    const extra = [this.makeAvatar('#888888', ' '), ...Object.keys(POWERUP_TYPES).map((t) => this.makePowerup(t))];
+    try { this.renderer.compile(this.scene, this.camera); this.renderer.compile(this.vmScene, this.vmCamera); } catch (e) { /* older drivers */ }
+    for (const t of [...tmp, ...extra]) this.scene.remove(t);
   }
 
   // ------------------------------------------------------------------ setup
@@ -84,7 +135,10 @@ export class Game3D {
     m.skin = L({ color: 0x9ea4a6, emissive: 0x15191b });
     m.nail = L({ color: 0x1a1414 });
     m.hair = L({ color: 0x050404, side: THREE.DoubleSide });
-    m.dress = L({ color: 0xe9e7e1, emissive: 0x2a2e33, transparent: true, opacity: 0.94, side: THREE.DoubleSide });
+    m.dress = L({ color: 0xe9e7e1, emissive: 0x2a2e33, side: THREE.DoubleSide });
+    m.books = L({ vertexColors: true });
+    m.jar = L({ color: 0x4a5a3a, emissive: 0x0a1008 });
+    m.cord = L({ color: 0x111111 });
     m.ember = new THREE.MeshBasicMaterial({ color: 0xff5a1a });
     m.plank = L({ color: 0x6b4a2a });
     return m;
@@ -92,29 +146,32 @@ export class Game3D {
 
   _lights() {
     const s = this.scene;
-    s.add(new THREE.AmbientLight(0x6070a0, 0.45));
-    s.add(new THREE.HemisphereLight(0x8090b0, 0x201812, 0.35));
-    // Torch
+    this.ambient = new THREE.AmbientLight(0x6070a0, 0.45); s.add(this.ambient);
+    this.hemi = new THREE.HemisphereLight(0x8090b0, 0x201812, 0.35); s.add(this.hemi);
+    // Torch, held low in the right hand so its shadows sweep as you move
     this.torch = new THREE.SpotLight(0xffe8c4, 26, 26, 0.52, 0.5, 1.5);
-    this.torch.position.set(0.15, -0.15, 0);
+    this.torch.position.set(0.2, -0.2, -0.1);
     this.camera.add(this.torch);
-    this.torch.target.position.set(0, -0.3, -4);
+    this.torch.target.position.set(0.05, -0.5, -5);
     this.camera.add(this.torch.target);
+    this.torch.shadow.mapSize.set(1024, 1024);
+    this.torch.shadow.camera.near = 0.15; this.torch.shadow.camera.far = 24;
+    this.torch.shadow.bias = -0.0005; this.torch.shadow.normalBias = 0.035;
     // Near fill so the immediate area is readable
     this.fill = new THREE.PointLight(0xffe2b0, 1.4, 6, 1.5);
     this.camera.add(this.fill);
     // Fixed room lights
     this.roomLights = [];
-    const add = (c, i, d, x, y, z, flick = 0) => {
+    const add = (c, i, d, x, y, z, flick = 0, bulb = false) => {
       const l = new THREE.PointLight(c, i, d, 1.4); l.position.set(x, y, z); s.add(l);
-      this.roomLights.push({ l, base: i, flick }); return l;
+      this.roomLights.push({ l, base: i, flick, bulb, fire: flick >= 1, fl: new Flick(), dipT: rand(10, 40), dip: 0 }); return l;
     };
     this.fireLight = add(0xff7a30, 9, 9, 12.6, 0.8, 5, 1);
-    add(0xffc77a, 4, 10, 0, 2.9, 7.5, 0.3);          // hall lamp
-    add(0xd9b37a, 3.5, 10, 4, -0.7, 3.5, 0.6);        // basement bulb
-    add(0xd9c08a, 3, 10, 0, 6.1, -0.5, 0.2);          // landing
-    add(0x8fa8d0, 3.5, 12, -12.5, 8.6, 0, 0.1);       // attic moonlight
-    add(0xc0d0ff, 2.5, 9, -8, 5.8, 6, 0.4);           // nursery nightlight
+    add(0xffc77a, 4, 10, 0, 2.75, 7.5, 0.3, true);          // hall lamp
+    add(0xd9b37a, 3.5, 10, 4, -0.75, 3.5, 0.6, true);        // basement bulb
+    add(0xe0c890, 3.6, 9, 2.4, 6.05, -0.3, 0.2, true);      // landing, lighting the attic ladder
+    add(0x8fa8d0, 3.5, 12, -12.5, 8.6, 0, 0.1);             // attic moonlight
+    add(0xa0b8ff, 2.5, 9, -8, 5.75, 6, 0.4, true);          // nursery nightlight
     // Movable lights for attacks / entity
     this.alertLights = [0, 1].map(() => { const l = new THREE.PointLight(0xff2a2a, 0, 7, 1.6); s.add(l); return l; });
     this.entityLight = new THREE.PointLight(0xbfd4ff, 0, 6, 1.5); s.add(this.entityLight);
@@ -123,6 +180,7 @@ export class Game3D {
   _merge(geos, mat, list) {
     if (!geos.length) return null;
     const m = new THREE.Mesh(mergeGeometries(geos), mat);
+    m.castShadow = m.receiveShadow = true;
     this.scene.add(m);
     if (list) list.push(m);
     return m;
@@ -137,11 +195,15 @@ export class Game3D {
       const fy = FLOORS[w.f].y;
       if (w.collide) this.colliders[w.f].push({ x1: w.x1, x2: w.x2, z1: w.z1, z2: w.z2 });
       if (!w.visible) continue;
-      const g = boxGeo(w.x2 - w.x1, w.y1 - w.y0, w.z2 - w.z1);
-      g.translate((w.x1 + w.x2) / 2, fy + (w.y0 + w.y1) / 2, (w.z1 + w.z2) / 2);
+      // Stop 12 mm short of the floor and ceiling planes so wall ends never z-fight with them
+      const H = FLOORS[w.f].h;
+      const y0 = w.y0 <= 0 ? 0.012 : w.y0, y1 = w.y1 >= H ? H - 0.012 : w.y1;
+      const g = boxGeo(w.x2 - w.x1, y1 - y0, w.z2 - w.z1);
+      g.translate((w.x1 + w.x2) / 2, fy + (y0 + y1) / 2, (w.z1 + w.z2) / 2);
       push(w.mat, g);
     }
     for (const [k, gs] of Object.entries(byMat)) this._merge(gs, this.mats[k] || this.mats.wall, this.wallMeshes);
+    this._buildTrim();
 
     // Floors & ceilings
     for (let f = 0; f < 4; f++) {
@@ -156,16 +218,16 @@ export class Game3D {
           sh.holes.push(p);
         }
         const g = new THREE.ShapeGeometry(sh);
-        const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 2.5, uv.getY(i) / 2.5);
+        const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 6, uv.getY(i) / 6);
         return g;
       };
       const floorG = mk(FLOOR_HOLES.filter((h) => h.f === f), true);
       floorG.rotateX(-Math.PI / 2); floorG.translate(0, F.y, 0);
-      const fm = new THREE.Mesh(floorG, this.mats['floor' + f]); this.scene.add(fm); this.wallMeshes.push(fm);
+      const fm = new THREE.Mesh(floorG, this.mats['floor' + f]); fm.receiveShadow = fm.castShadow = true; this.scene.add(fm); this.wallMeshes.push(fm);
       const roofHoles = f === 3 ? ENTRANCES.filter((e) => e.kind === 'hatch' || e.kind === 'skylight').map((e) => ({ x1: e.x - 0.5, x2: e.x + 0.5, z1: e.z - 0.5, z2: e.z + 0.5 })) : [];
       const ceilG = mk([...FLOOR_HOLES.filter((h) => h.f === f + 1), ...roofHoles], false);
       ceilG.rotateX(Math.PI / 2); ceilG.translate(0, F.y + F.h, 0);
-      const cm = new THREE.Mesh(ceilG, f === 3 ? this.mats.attic : this.mats.ceiling); this.scene.add(cm); this.wallMeshes.push(cm);
+      const cm = new THREE.Mesh(ceilG, f === 3 ? this.mats.attic : this.mats.ceiling); cm.receiveShadow = cm.castShadow = true; this.scene.add(cm); this.wallMeshes.push(cm);
     }
     // Attic rafters
     const rafters = [];
@@ -174,9 +236,15 @@ export class Game3D {
     this._merge(rafters, this.mats.darkwood);
 
     // Outside ground, so lower windows look out on something
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshLambertMaterial({ map: TX.surface('ground') }));
+    // (with a hole for the house, so it can never z-fight with the ground floor)
+    const gs = new THREE.Shape();
+    gs.moveTo(-100, -100); gs.lineTo(100, -100); gs.lineTo(100, 100); gs.lineTo(-100, 100); gs.lineTo(-100, -100);
+    const gh = new THREE.Path(); gh.moveTo(-14.1, -10.1); gh.lineTo(-14.1, 10.1); gh.lineTo(14.1, 10.1); gh.lineTo(14.1, -10.1); gh.lineTo(-14.1, -10.1);
+    gs.holes.push(gh);
+    const gg = new THREE.ShapeGeometry(gs);
+    const guv = gg.attributes.uv; for (let i = 0; i < guv.count; i++) guv.setXY(i, guv.getX(i) / 200, guv.getY(i) / 200);
+    const ground = new THREE.Mesh(gg, new THREE.MeshLambertMaterial({ map: TX.surface('ground') }));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02; this.scene.add(ground);
-    // keep the basement sealed visually from the outside ground (it's below it)
 
     // Stairs
     const steps = [];
@@ -193,8 +261,8 @@ export class Game3D {
           const a = s.low === 'min' ? lerp(s.z1, s.z2, t0) : lerp(s.z2, s.z1, t1), b = s.low === 'min' ? lerp(s.z1, s.z2, t1) : lerp(s.z2, s.z1, t0);
           z1 = Math.min(a, b); z2 = Math.max(a, b);
         }
-        const g = boxGeo(x2 - x1, top - y0, z2 - z1, 1);
-        g.translate((x1 + x2) / 2, (y0 + top) / 2, (z1 + z2) / 2);
+        const g = boxGeo(x2 - x1, top - y0 - 0.012, z2 - z1, 1);
+        g.translate((x1 + x2) / 2, (y0 + 0.012 + top) / 2, (z1 + z2) / 2);
         steps.push(g);
       }
     }
@@ -202,8 +270,11 @@ export class Game3D {
 
     for (const e of ENTRANCES) this._buildEntrance(e);
     for (const it of FURNITURE) this._buildFurniture(it);
+    this._buildLadders();
+    this._flushStatic();
     this._buildDecor();
     this._buildSalt();
+    this._buildAtmosphere();
     // Static outdoors silhouettes: trees seen through windows
     const treeMat = new THREE.MeshBasicMaterial({ color: 0x020304 });
     for (let i = 0; i < 24; i++) {
@@ -224,7 +295,7 @@ export class Game3D {
     const H = (e.t || 0) - (e.b || 0), W = e.w || 1;
     const backdrop = (w, h) => {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: TX.radial('rgba(48,64,90,0.95)', 'rgba(3,5,9,1)'), fog: false }));
-      m.position.set(0, 0, -3.2); grp.add(m); return m;
+      m.position.set(0, 0, -3.2); grp.add(m); this.backdrops.push(m.material); return m;
     };
     switch (e.kind) {
       case 'window': {
@@ -246,6 +317,11 @@ export class Game3D {
             (obj.curtains = obj.curtains || []).push(c);
           }
         }
+        // a faint shaft of moonlight slanting into the room
+        const sg = new THREE.PlaneGeometry(W * 0.85, 3.4); sg.translate(0, -1.7, 0);
+        const sh = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ map: TX.shaft(), transparent: true, opacity: 0.07, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+        sh.position.set(0, H * 0.35, 0.15); sh.rotation.x = -0.95; sh.renderOrder = 2; grp.add(sh);
+        this.shafts.push(sh.material);
         const hp = new THREE.Mesh(new THREE.PlaneGeometry(W * 0.8, H * 0.6), new THREE.MeshBasicMaterial({ map: TX.handprints(), transparent: true, opacity: 0, depthWrite: false }));
         hp.position.set(0, 0.1, 0.01); grp.add(hp); obj.prints = hp;
         break;
@@ -300,12 +376,13 @@ export class Game3D {
         else {
           const gl = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mats.glass); gl.rotation.x = Math.PI / 2; gl.position.set(0.5, 0, 0); pivot.add(gl);
           const sky = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), new THREE.MeshBasicMaterial({ map: TX.radial('rgba(48,64,90,0.95)', 'rgba(3,5,9,1)'), fog: false }));
-          sky.rotation.x = Math.PI / 2; sky.position.y = 2.5; grp.add(sky);
+          sky.rotation.x = Math.PI / 2; sky.position.y = 2.5; grp.add(sky); this.backdrops.push(sky.material);
         }
         obj.pivot = pivot;
         break;
       }
     }
+    grp.traverse((o) => { if (o.isMesh && o.material.isMeshLambertMaterial) o.castShadow = o.receiveShadow = true; });
     this.entranceObjs.set(e.id, obj);
   }
 
@@ -314,29 +391,36 @@ export class Game3D {
     const bx = furnitureBox(it);
     this.colliders[it.f].push({ x1: bx.x1, x2: bx.x2, z1: bx.z1, z2: bx.z2 });
     const grp = new THREE.Group();
-    grp.position.set(it.x, FLOORS[it.f].y, it.z);
+    // lifted 12 mm so furniture bottoms never z-fight with the ceiling of the room below
+    grp.position.set(it.x, FLOORS[it.f].y + 0.012, it.z);
     grp.rotation.y = (it.r || 0) * Math.PI / 2;
     const [w, d, h] = [s[0], s[1], s[2]];
     const M = this.mats;
     const B = (bw, bh, bd, mat, x, y, z, p = grp) => { const m = new THREE.Mesh(boxGeo(bw, bh, bd, 1), mat); m.position.set(x, y, z); p.add(m); return m; };
     const legs = (lw, ld, lh, mat) => { for (const sx of [-1, 1]) for (const sz of [-1, 1]) B(0.06, lh, 0.06, mat, sx * (lw / 2 - 0.05), lh / 2, sz * (ld / 2 - 0.05)); };
     switch (it.t) {
-      case 'bed': B(w, 0.35, d, M.darkwood, 0, 0.2, 0); B(w - 0.1, 0.22, d - 0.1, M.white, 0, 0.47, 0); B(w * 0.7, 0.12, 0.35, M.cream, 0, 0.62, -d / 2 + 0.3); B(w, 1.1, 0.08, M.darkwood, 0, 0.55, -d / 2); B(w - 0.08, 0.06, d * 0.55, M.fabric, 0, 0.6, d * 0.18); break;
+      case 'bed': B(w, 0.35, d, M.darkwood, 0, 0.2, 0); B(w - 0.1, 0.22, d - 0.1, M.white, 0, 0.47, 0); B(w * 0.7, 0.12, 0.35, M.cream, 0, 0.62, -d / 2 + 0.3); B(w + 0.04, 1.1, 0.08, M.darkwood, 0, 0.55, -d / 2); B(w - 0.08, 0.06, d * 0.55, M.fabric, 0, 0.6, d * 0.18); break;
       case 'cot': B(w, 0.05, d, M.white, 0, 0.5, 0); for (let i = 0; i < 9; i++) { B(0.03, 0.5, 0.03, M.white, -w / 2, 0.75, -d / 2 + i * d / 8); B(0.03, 0.5, 0.03, M.white, w / 2, 0.75, -d / 2 + i * d / 8); } B(w, 0.04, 0.04, M.white, 0, 1.0, -d / 2); B(w, 0.04, 0.04, M.white, 0, 1.0, d / 2); legs(w, d, 0.5, M.white); break;
       case 'table': case 'smalltable': case 'desk': B(w, 0.06, d, M.wood, 0, h - 0.03, 0); legs(w, d, h - 0.06, M.wood); if (it.t === 'desk') B(w * 0.4, 0.2, d - 0.1, M.darkwood, w * 0.25, h - 0.16, 0); break;
       case 'chair': B(w, 0.06, d, M.wood, 0, 0.46, 0); B(w, 0.55, 0.05, M.wood, 0, 0.75, -d / 2); legs(w, d, 0.44, M.wood); break;
-      case 'sofa': case 'armchair': B(w, 0.42, d, M.fabric, 0, 0.21, 0); B(w, 0.5, 0.2, M.fabric, 0, 0.65, -d / 2 + 0.1); B(0.18, 0.25, d, M.fabric, -w / 2 + 0.09, 0.55, 0); B(0.18, 0.25, d, M.fabric, w / 2 - 0.09, 0.55, 0); break;
+      case 'sofa': case 'armchair': B(w, 0.42, d, M.fabric, 0, 0.21, 0); B(w - 0.03, 0.5, 0.2, M.fabric, 0, 0.66, -d / 2 + 0.1); B(0.18, 0.25, d, M.fabric, -w / 2 + 0.09, 0.55, 0); B(0.18, 0.25, d, M.fabric, w / 2 - 0.09, 0.55, 0); break;
       case 'bookshelf': case 'shelf': {
         B(w, h, 0.04, M.darkwood, 0, h / 2, -d / 2 + 0.02); B(0.04, h, d, M.darkwood, -w / 2, h / 2, 0); B(0.04, h, d, M.darkwood, w / 2, h / 2, 0);
         const n = 5;
         for (let i = 0; i <= n; i++) {
-          const y = i * (h / n); B(w, 0.03, d, M.darkwood, 0, y + 0.015, 0);
+          const y = i * (h / n); B(w - 0.045, 0.03, d - 0.01, M.darkwood, 0, y + 0.015, 0);
           if (i === n) continue;
           let x = -w / 2 + 0.06;
           while (x < w / 2 - 0.1) {
             const bw = rand(0.04, 0.09);
-            if (it.t === 'bookshelf') { const bh = rand(0.2, h / n - 0.06); B(bw, bh, d * 0.8, new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(rand(0, 1), 0.35, rand(0.12, 0.25)) }), x + bw / 2, y + bh / 2 + 0.03, 0); }
-            else if (Math.random() < 0.4) { const j = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.18, 8), new THREE.MeshLambertMaterial({ color: 0x4a5a3a, transparent: true, opacity: 0.8 })); j.position.set(x + 0.06, y + 0.12, 0); grp.add(j); }
+            if (it.t === 'bookshelf') {
+              const bh = rand(0.2, h / n - 0.06);
+              const book = B(bw, bh, d * 0.8, M.books, x + bw / 2, y + bh / 2 + 0.031, 0);
+              const col = new THREE.Color().setHSL(rand(0, 1), 0.4, rand(0.12, 0.24)).convertSRGBToLinear();
+              const n3 = book.geometry.attributes.position.count, ca = new Float32Array(n3 * 3);
+              for (let k = 0; k < n3; k++) { ca[k * 3] = col.r; ca[k * 3 + 1] = col.g; ca[k * 3 + 2] = col.b; }
+              book.geometry.setAttribute('color', new THREE.BufferAttribute(ca, 3));
+            } else if (Math.random() < 0.4) { const j = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.18, 8), M.jar); j.position.set(x + 0.06, y + 0.12, 0); grp.add(j); }
             x += bw + (it.t === 'shelf' ? 0.12 : 0.005);
           }
         }
@@ -391,7 +475,127 @@ export class Game3D {
       case 'fireplace': break;
       default: B(w, h, d, M.wood, 0, h / 2, 0);
     }
-    this.scene.add(grp);
+    if (['rocker', 'clock', 'mannequin', 'dollhouse'].includes(it.t)) {
+      grp.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+      this.scene.add(grp);
+      return;
+    }
+    // Static furniture is baked into a handful of merged meshes (far fewer draw calls)
+    grp.updateMatrixWorld(true);
+    grp.traverse((o) => { if (o.isMesh) this._addStatic(o.material, o.geometry.clone().applyMatrix4(o.matrixWorld)); });
+  }
+
+  _addStatic(mat, geo) {
+    if (!this.staticGeos.has(mat)) this.staticGeos.set(mat, []);
+    this.staticGeos.get(mat).push(geo);
+  }
+  _flushStatic() {
+    for (const [mat, geos] of this.staticGeos) {
+      const m = this._merge(geos, mat);
+      if (m) m.castShadow = m.receiveShadow = true;
+    }
+    this.staticGeos.clear();
+  }
+
+  // Skirting boards along plaster walls and frames around open doorways
+  _buildTrim() {
+    const trim = [], casing = [];
+    for (const w of WALLS) {
+      if (!w.visible || w.rail || !['wall', 'ext1', 'ext2'].includes(w.mat) || w.y0 > 0 || w.y1 - w.y0 < 1.5) continue;
+      const alongX = (w.x2 - w.x1) > (w.z2 - w.z1);
+      const len = (alongX ? w.x2 - w.x1 : w.z2 - w.z1) + 0.03, th = (alongX ? w.z2 - w.z1 : w.x2 - w.x1) + 0.04;
+      const hh = alongX ? 0.14 : 0.146;
+      const g = boxGeo(alongX ? len : th, hh, alongX ? th : len, 1);
+      g.translate((w.x1 + w.x2) / 2, FLOORS[w.f].y + 0.012 + hh / 2, (w.z1 + w.z2) / 2);
+      trim.push(g);
+    }
+    for (const d of DOORWAYS) {
+      const fy = FLOORS[d.f].y, th = d.thick + 0.06, top = d.t;
+      const piece = (a, b, y0, y1, thick) => {
+        const c = (a + b) / 2;
+        const g = d.dir === 'x' ? boxGeo(b - a, y1 - y0, thick, 1) : boxGeo(thick, y1 - y0, b - a, 1);
+        g.translate(d.dir === 'x' ? c : d.fixed, fy + (y0 + y1) / 2, d.dir === 'x' ? d.fixed : c);
+        casing.push(g);
+      };
+      const s0 = d.c - d.w / 2, s1 = d.c + d.w / 2;
+      piece(s0 - 0.03, s0 + 0.06, 0.012, top + 0.07, th);
+      piece(s1 - 0.06, s1 + 0.03, 0.012, top + 0.07, th);
+      piece(s0 - 0.035, s1 + 0.035, top - 0.05, top + 0.09, th + 0.012);
+    }
+    for (const m of [this._merge(trim, this.mats.darkwood), this._merge(casing, this.mats.frame)]) if (m) m.castShadow = m.receiveShadow = true;
+  }
+
+  // The pull-down attic ladder
+  _buildLadders() {
+    for (const L of LADDERS) {
+      const y0 = FLOORS[L.f0].y, y1 = FLOORS[L.f1].y;
+      const top = y1 + 0.85;
+      const zAt = (y) => L.foot + (L.head - L.foot) * ((y - y0) / (y1 - y0));
+      const dz = zAt(top) - L.foot, dy = top - y0;
+      const len = Math.hypot(dz, dy);
+      const g = new THREE.Group();
+      g.position.set(L.x, y0 + 0.012, L.foot);
+      g.rotation.x = Math.atan2(dz, dy);
+      const M = this.mats;
+      for (const sx of [-1, 1]) { const r = new THREE.Mesh(boxGeo(0.06, len, 0.05, 1), M.wood); r.position.set(sx * 0.33, len / 2, 0); g.add(r); }
+      for (let y = 0.25; y < len - 0.1; y += 0.3) { const r = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.62, 8), M.wood); r.rotation.z = Math.PI / 2; r.position.set(0, y, 0); g.add(r); }
+      // hatch door hanging open beside the ladder, and a frame round the opening
+      const h = L.hole;
+      const door = new THREE.Mesh(boxGeo(0.04, 0.9, h.z2 - h.z1 - 0.05, 1), M.wood); door.position.set(h.x2 + 0.03 - L.x, y1 - 0.47 - y0, (h.z1 + h.z2) / 2 - L.foot);
+      const holder = new THREE.Group(); holder.position.set(L.x, y0, L.foot); holder.add(door);
+      const cord = new THREE.Mesh(boxGeo(0.01, 0.5, 0.01, 1), M.cord); cord.position.set(h.x2 + 0.03 - L.x, y1 - 1.15 - y0, h.z2 - 0.15 - L.foot); holder.add(cord);
+      for (const [w, d, x, z] of [[h.x2 - h.x1 + 0.1, 0.06, (h.x1 + h.x2) / 2, h.z1 - 0.03], [h.x2 - h.x1 + 0.1, 0.06, (h.x1 + h.x2) / 2, h.z2 + 0.03], [0.06, h.z2 - h.z1, h.x1 - 0.03, (h.z1 + h.z2) / 2], [0.06, h.z2 - h.z1, h.x2 + 0.03, (h.z1 + h.z2) / 2]]) {
+        const fr = new THREE.Mesh(boxGeo(w, 0.08, d, 1), M.frame); fr.position.set(x - L.x, y1 - 0.055 - y0, z - L.foot); holder.add(fr);
+      }
+      for (const grp of [g, holder]) {
+        this.scene.add(grp); grp.updateMatrixWorld(true);
+        grp.traverse((o) => { if (o.isMesh) this._addStatic(o.material, o.geometry.clone().applyMatrix4(o.matrixWorld)); });
+        this.scene.remove(grp);
+      }
+    }
+  }
+
+  // Bulbs, cobwebs and drifting dust
+  _buildAtmosphere() {
+    for (const r of this.roomLights) {
+      if (!r.bulb) continue;
+      const p = r.l.position, F = FLOORS[floorOfY(p.y)];
+      const ceil = F.y + F.h;
+      const cord = new THREE.Mesh(boxGeo(0.012, ceil - p.y - 0.06, 0.012, 1), this.mats.cord); cord.position.set(p.x, (ceil + p.y + 0.06) / 2, p.z); this.scene.add(cord);
+      r.bulbMat = new THREE.MeshBasicMaterial({ color: r.l.color.clone().multiplyScalar(1.4) });
+      r.bulbCol = r.bulbMat.color.clone();
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), r.bulbMat); b.position.copy(p); this.scene.add(b);
+      r.glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: TX.radial('rgba(255,220,160,0.55)', 'rgba(255,200,120,0)'), blending: THREE.AdditiveBlending, depthWrite: false }));
+      r.glow.scale.set(0.9, 0.9, 1); r.glow.position.copy(p); this.scene.add(r.glow);
+    }
+    // cobwebs strung across upper room corners
+    const webMat = new THREE.MeshBasicMaterial({ map: TX.cobweb(), transparent: true, alphaTest: 0.08, side: THREE.DoubleSide, depthWrite: false, color: 0x9a9a9a });
+    let k = 0;
+    for (const r of ROOMS) {
+      const F = FLOORS[r.f];
+      const corners = [[r.x1, r.z1, 1, 1], [r.x2, r.z1, -1, 1], [r.x1, r.z2, 1, -1], [r.x2, r.z2, -1, -1]];
+      for (const [cx, cz, sx, sz] of corners) {
+        if ((k++ * 7919) % 5 > 1) continue; // roughly two in five corners
+        const size = 0.7 + ((k * 13) % 5) * 0.12;
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(size * 1.4, size), webMat);
+        const off = 0.13 + size * 0.32;
+        m.position.set(cx + sx * off, F.y + F.h - size / 2 - 0.02, cz + sz * off);
+        m.rotation.y = Math.atan2(sx, sz);
+        m.renderOrder = 1;
+        this.scene.add(m);
+      }
+    }
+    // dust motes
+    const N = 420, pos = new Float32Array(N * 3);
+    this.dustVel = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      pos[i * 3] = rand(-6, 6); pos[i * 3 + 1] = rand(-1.5, 2.5); pos[i * 3 + 2] = rand(-6, 6);
+      this.dustVel[i * 3] = rand(-0.04, 0.04); this.dustVel[i * 3 + 1] = rand(-0.03, 0.02); this.dustVel[i * 3 + 2] = rand(-0.04, 0.04);
+    }
+    const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.dust = new THREE.Points(dg, new THREE.PointsMaterial({ size: 0.022, map: TX.radial('rgba(255,240,210,1)', 'rgba(255,240,210,0)'), color: 0xb8a888, transparent: true, opacity: 0.38, depthWrite: false, blending: THREE.AdditiveBlending }));
+    this.dust.frustumCulled = false;
+    this.scene.add(this.dust);
   }
 
   _buildDecor() {
@@ -404,7 +608,7 @@ export class Game3D {
       if (p.v !== 'scratched' && Math.random() < 0.35) g.rotation.z = rand(-0.12, 0.12); // crooked
       const fr = new THREE.Mesh(boxGeo(w + 0.14, h + 0.14, 0.05, 1), this.mats.gold); g.add(fr);
       const mat = new THREE.MeshLambertMaterial({ map: TX.portrait(p.v) });
-      const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); pic.position.z = 0.03; g.add(pic);
+      const pic = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat); pic.position.z = 0.04; g.add(pic);
       this.scene.add(g);
       this.portraits.push({ ...p, g, mat, alt: false, pos: g.position.clone(), dir: new THREE.Vector3(Math.sin(p.rot), 0, Math.cos(p.rot)) });
     }
@@ -415,10 +619,10 @@ export class Game3D {
     }
     // Bathroom mirror
     const mir = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.8), new THREE.MeshBasicMaterial({ color: 0x1b2128 }));
-    mir.position.set(-8, FLOORS[2].y + 1.6, -9.85); this.scene.add(mir);
+    mir.position.set(-8, FLOORS[2].y + 1.6, -9.83); this.scene.add(mir);
     const mf = new THREE.Mesh(boxGeo(0.7, 0.9, 0.03, 1), this.mats.gold); mf.position.set(-8, FLOORS[2].y + 1.6, -9.865); this.scene.add(mf);
     const ghost = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.42), new THREE.MeshBasicMaterial({ map: TX.womanFace(), transparent: true, opacity: 0 }));
-    ghost.position.set(-7.85, FLOORS[2].y + 1.62, -9.84); this.scene.add(ghost);
+    ghost.position.set(-7.85, FLOORS[2].y + 1.62, -9.82); this.scene.add(ghost);
     this.mirror = { pos: new THREE.Vector3(-8, FLOORS[2].y + 1.6, -9.85), ghost, t: 0, cd: 0 };
 
     this.notes = NOTES.map((n) => {
@@ -471,6 +675,7 @@ export class Game3D {
       fingers.push(segs);
     }
     g.userData.fingers = fingers;
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     return g;
   }
   curlHand(h, amt) {
@@ -523,6 +728,7 @@ export class Game3D {
       arms.push(sh);
     }
     g.userData = { head, arms, strands, dress };
+    g.traverse((o) => { if (o.isMesh && o.material.isMeshLambertMaterial) o.castShadow = true; });
     return g;
   }
 
@@ -546,21 +752,149 @@ export class Game3D {
     return m;
   }
 
+  // Players: ordinary people in night clothes — but their skin is cold and grey, their eyes sunken.
   makeAvatar(color, name) {
     const g = new THREE.Group();
-    const mat = new THREE.MeshLambertMaterial({ color, emissive: new THREE.Color(color).multiplyScalar(0.25) });
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.85, 4, 10), mat); body.position.y = 0.72; g.add(body);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 12), mat); head.position.y = 1.5; g.add(head);
-    const visor = new THREE.Mesh(boxGeo(0.28, 0.08, 0.1, 1), new THREE.MeshBasicMaterial({ color: 0x111111 })); visor.position.set(0, 1.53, 0.16); g.add(visor);
+    const shirtCol = new THREE.Color(color).lerp(new THREE.Color(0x6d7378), 0.3);
+    const L = (c, e = 0x000000) => new THREE.MeshLambertMaterial({ color: c, emissive: e });
+    const mats = {
+      shirt: L(shirtCol, shirtCol.clone().multiplyScalar(0.14)),
+      skin: L(0x8b959b, 0x0d161b), pants: L(0x34373c), shoe: L(0x17181a), hair: L(0x25272a),
+      socket: new THREE.MeshBasicMaterial({ color: 0x14181b }), iris: new THREE.MeshBasicMaterial({ color: 0xaecbd6 }),
+      metal: L(0x2e3034),
+    };
+    const cap = (r, len, m) => new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 10), m);
+    const body = new THREE.Group(); g.add(body);
+    const hips = new THREE.Group(); hips.position.y = 0.92; body.add(hips);
+    const pelvis = cap(0.14, 0.06, mats.pants); pelvis.scale.set(1.18, 1, 0.82); hips.add(pelvis);
+    const torso = new THREE.Group(); torso.position.y = 0.06; hips.add(torso);
+    const chest = cap(0.165, 0.3, mats.shirt); chest.position.y = 0.27; chest.scale.set(1.12, 1, 0.74); torso.add(chest);
+    const collar = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.018, 6, 14), mats.shirt); collar.rotation.x = Math.PI / 2; collar.position.y = 0.53; torso.add(collar);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.055, 0.12, 10), mats.skin); neck.position.y = 0.58; torso.add(neck);
+    const head = new THREE.Group(); head.position.y = 0.72; torso.add(head);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.115, 18, 14), mats.skin); skull.scale.set(0.88, 1.08, 0.97); head.add(skull);
+    const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.085, 14, 10), mats.skin); jaw.scale.set(0.95, 0.8, 0.9); jaw.position.set(0, -0.055, 0.02); head.add(jaw);
+    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.124, 18, 10, 0, Math.PI * 2, 0, Math.PI * 0.52), mats.hair); hair.scale.set(0.9, 1.05, 1); hair.position.set(0, 0.012, -0.008); hair.rotation.x = -0.25; head.add(hair);
+    for (const sx of [-1, 1]) {
+      const sock = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), mats.socket); sock.scale.set(1.1, 0.8, 0.45); sock.position.set(sx * 0.04, 0.0, 0.097); head.add(sock);
+      const iris = new THREE.Mesh(new THREE.SphereGeometry(0.0075, 8, 6), mats.iris); iris.position.set(sx * 0.04, 0.0, 0.108); head.add(iris);
+      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.024, 8, 6), mats.skin); ear.scale.set(0.5, 1, 0.8); ear.position.set(sx * 0.1, -0.01, 0); head.add(ear);
+    }
+    const nose = new THREE.Mesh(boxGeo(0.022, 0.045, 0.03, 1), mats.skin); nose.position.set(0, -0.03, 0.11); head.add(nose);
+    const mouth = new THREE.Mesh(boxGeo(0.045, 0.006, 0.01, 1), mats.socket); mouth.position.set(0, -0.075, 0.098); head.add(mouth);
+    const arms = [];
+    for (const sx of [-1, 1]) {
+      const sh = new THREE.Group(); sh.position.set(sx * 0.215, 0.47, 0); torso.add(sh);
+      const upper = cap(0.05, 0.22, mats.shirt); upper.position.y = -0.15; sh.add(upper);
+      const el = new THREE.Group(); el.position.y = -0.3; sh.add(el);
+      const fore = cap(0.04, 0.2, mats.skin); fore.position.y = -0.13; el.add(fore);
+      const hand = new THREE.Group(); hand.position.y = -0.27; el.add(hand);
+      const palm = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), mats.skin); palm.scale.set(0.8, 1.15, 0.6); hand.add(palm);
+      arms.push({ sh, el, hand });
+    }
+    // torch in the right hand, beam pointing along the forearm
+    const torch = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.018, 0.2, 10), mats.metal); torch.position.y = -0.06; arms[1].hand.add(torch);
     const beam = new THREE.Mesh(new THREE.ConeGeometry(0.55, 3.2, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xffe8c0, transparent: true, opacity: 0.025, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
-    beam.rotation.x = -Math.PI / 2; beam.position.set(0.15, 1.3, 1.75); g.add(beam);
+    beam.position.y = -0.16 - 1.6; arms[1].hand.add(beam);
+    const legs = [];
+    for (const sx of [-1, 1]) {
+      const hip = new THREE.Group(); hip.position.set(sx * 0.085, -0.04, 0); hips.add(hip);
+      const thigh = cap(0.068, 0.3, mats.pants); thigh.position.y = -0.2; hip.add(thigh);
+      const knee = new THREE.Group(); knee.position.y = -0.42; hip.add(knee);
+      const shin = cap(0.056, 0.3, mats.pants); shin.position.y = -0.2; knee.add(shin);
+      const shoe = new THREE.Mesh(boxGeo(0.09, 0.07, 0.22, 1), mats.shoe); shoe.position.set(0, -0.42, 0.04); knee.add(shoe);
+      legs.push({ hip, knee });
+    }
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: TX.labelSprite(name, color), depthTest: false, transparent: true }));
-    label.scale.set(1.2, 0.3, 1); label.position.y = 2.05; label.renderOrder = 5; g.add(label);
+    label.scale.set(1.2, 0.3, 1); label.position.y = 2.08; label.renderOrder = 5; g.add(label);
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.45, 20), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; g.add(ring);
-    g.userData = { beam, body };
+    g.traverse((o) => { if (o.isMesh && o !== beam && o !== ring) o.castShadow = true; });
+    g.userData = { body, chest, head, arms, legs, beam, mats, seed: Math.random() * 10 };
     this.scene.add(g);
     return g;
+  }
+
+  _animateAvatar(o, dt) {
+    const A = o.g.userData;
+    const amp = clamp(o.speed / 3.4, 0, 1.25);
+    if (amp > 0.05) o.phase = (o.phase || 0) + dt * (3.2 + o.speed * 1.9);
+    const ph = o.phase || 0;
+    const sw = Math.sin(ph) * 0.62 * amp;
+    A.legs[0].hip.rotation.x = sw; A.legs[1].hip.rotation.x = -sw;
+    A.legs[0].knee.rotation.x = Math.max(0, Math.sin(ph)) * 0.95 * amp;
+    A.legs[1].knee.rotation.x = Math.max(0, -Math.sin(ph)) * 0.95 * amp;
+    A.arms[0].sh.rotation.x = -sw * 0.75; A.arms[0].el.rotation.x = -0.15 - Math.abs(sw) * 0.35;
+    A.arms[0].sh.rotation.z = -0.06;
+    A.arms[1].sh.rotation.x = -1.0 - sw * 0.08; A.arms[1].el.rotation.x = -0.4;
+    A.body.position.y = Math.abs(Math.cos(ph)) * 0.035 * amp;
+    A.chest.scale.y = 1 + Math.sin(this.time * 1.7 + A.seed) * 0.012;
+    A.head.rotation.y = Math.sin(this.time * 0.35 + A.seed) * 0.35 * Math.max(0, 1 - amp);
+    A.head.rotation.x = 0.05 + Math.sin(this.time * 0.5 + A.seed) * 0.04;
+  }
+
+  _setGhostly(o, on) {
+    for (const m of Object.values(o.g.userData.mats)) { m.transparent = on; m.opacity = on ? 0.22 : 1; m.depthWrite = !on; m.needsUpdate = true; }
+  }
+
+  // First-person view: your own cold grey hand holding the torch
+  _buildViewModel(color) {
+    if (this.vm) this.vmScene.remove(this.vm);
+    const vm = new THREE.Group();
+    const skin = new THREE.MeshLambertMaterial({ color: 0x7d878d, emissive: 0x070c10 });
+    const sleeve = new THREE.MeshLambertMaterial({ color: new THREE.Color(color).lerp(new THREE.Color(0x6d7378), 0.3) });
+    const metal = new THREE.MeshLambertMaterial({ color: 0x34363b });
+    const torch = new THREE.Group(); vm.add(torch);
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.024, 0.24, 14), metal); body.rotation.x = Math.PI / 2; torch.add(body);
+    const head = new THREE.Mesh(new THREE.CylinderGeometry(0.042, 0.028, 0.07, 14), metal); head.rotation.x = Math.PI / 2; head.position.z = -0.15; torch.add(head);
+    this.vmLensMat = new THREE.MeshBasicMaterial({ color: 0xfff1cf });
+    const lens = new THREE.Mesh(new THREE.CircleGeometry(0.036, 16), this.vmLensMat); lens.position.z = -0.186; lens.rotation.y = Math.PI; torch.add(lens);
+    const fist = new THREE.Mesh(new THREE.SphereGeometry(0.05, 14, 10), skin); fist.scale.set(0.95, 1.05, 1.25); fist.position.set(0.005, -0.012, 0.03); vm.add(fist);
+    for (let i = 0; i < 4; i++) { const f = new THREE.Mesh(new THREE.CapsuleGeometry(0.0125, 0.035, 3, 6), skin); f.rotation.z = Math.PI / 2; f.position.set(-0.022, 0.012 - i * 0.008, -0.005 + i * 0.022); vm.add(f); }
+    const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.013, 0.04, 3, 6), skin); thumb.rotation.set(0.3, 0, 0.6); thumb.position.set(-0.02, 0.03, -0.01); vm.add(thumb);
+    const fore = new THREE.Mesh(new THREE.CapsuleGeometry(0.034, 0.2, 4, 10), skin); fore.rotation.x = Math.PI / 2 - 0.25; fore.position.set(0.02, -0.06, 0.17); vm.add(fore);
+    const cuff = new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.22, 4, 10), sleeve); cuff.rotation.x = Math.PI / 2 - 0.25; cuff.position.set(0.03, -0.11, 0.36); vm.add(cuff);
+    vm.position.set(0.23, -0.22, -0.4);
+    vm.rotation.set(0.05, 0.1, 0.05);
+    vm.scale.setScalar(0.85);
+    this.vmScene.add(vm);
+    this.vm = vm;
+  }
+
+  startClimb(dir) {
+    if (this.climb) return;
+    const L = LADDERS[0];
+    const y0 = FLOORS[L.f0].y, y1 = FLOORS[L.f1].y;
+    let pts = [
+      { x: L.x, y: y0, z: L.base.z }, { x: L.x, y: y0 + 0.3, z: -0.4 },
+      { x: L.x, y: y1 - 0.4, z: -1.05 }, { x: L.x, y: y1, z: L.top.z },
+    ];
+    if (dir === 'down') pts = pts.reverse();
+    let total = 0;
+    const segs = [];
+    for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i].y - pts[i - 1].y, pts[i].z - pts[i - 1].z); segs.push(d); total += d; }
+    this.climb = { dir, pts, segs, total, t: 0, dur: 2.3, creak: 0, L };
+    this.player.yaw = 0;
+    audio.play('creak', { vol: 0.5, dur: 0.6 });
+  }
+
+  _updateClimb(dt) {
+    const c = this.climb, P = this.player;
+    c.t += dt;
+    const u = clamp(c.t / c.dur, 0, 1);
+    const e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2; // ease in-out
+    let d = e * c.total, i = 0;
+    while (i < c.segs.length - 1 && d > c.segs[i]) { d -= c.segs[i]; i++; }
+    const a = c.pts[i], b = c.pts[i + 1], k = c.segs[i] ? clamp(d / c.segs[i], 0, 1) : 1;
+    P.x = lerp(a.x, b.x, k); P.y = lerp(a.y, b.y, k); P.z = lerp(a.z, b.z, k); P.ground = P.y;
+    const y0 = FLOORS[c.L.f0].y;
+    P.f = P.y > y0 + 1.7 ? c.L.f1 : c.L.f0;
+    const look = c.dir === 'up' ? 0.45 : -0.55;
+    P.pitch = lerp(P.pitch, u < 0.75 ? look : 0, Math.min(1, dt * 4));
+    P.yaw = lerp(P.yaw, 0, Math.min(1, dt * 6));
+    c.creak -= dt;
+    if (c.creak <= 0 && u < 0.9) { c.creak = 0.32; audio.play('step', { vol: 0.45, creaky: true }); }
+    if (u >= 1) { P.f = c.dir === 'up' ? c.L.f1 : c.L.f0; P.ground = FLOORS[P.f].y; P.y = P.ground; this.climb = null; }
   }
 
   makePowerup(type) {
@@ -729,12 +1063,13 @@ export class Game3D {
     this.others.clear();
     for (const p of list) {
       if (p.id === myId) {
-        Object.assign(this.player, { x: p.x, y: p.y, z: p.z, f: p.f, yaw: p.yaw, pitch: 0 });
+        Object.assign(this.player, { x: p.x, y: p.y, z: p.z, f: p.f, yaw: p.yaw, pitch: 0, ground: p.y });
+        this._buildViewModel(p.color);
         continue;
       }
       const g = this.makeAvatar(p.color, p.name);
       g.position.set(p.x, p.y, p.z); g.rotation.y = p.yaw + Math.PI;
-      this.others.set(p.id, { g, tx: p.x, ty: p.y, tz: p.z, tyaw: p.yaw + Math.PI, name: p.name, f: p.f, stepAcc: 0 });
+      this.others.set(p.id, { g, tx: p.x, ty: p.y, tz: p.z, tyaw: p.yaw + Math.PI, name: p.name, f: p.f, stepAcc: 0, speed: 0, phase: 0, ghost: false });
     }
   }
   removePlayer(id) { const o = this.others.get(id); if (o) { this.scene.remove(o.g); this.others.delete(id); } }
@@ -830,7 +1165,16 @@ export class Game3D {
     this.time += dt;
     const P = this.player, C = this.controls;
     const frozen = this.frozen || this.me?.cg;
-    if (!frozen && C.enabled) {
+    if (this.climb) { C.consumeLook(); this._updateClimb(dt); }
+    else if (!frozen && C.enabled) {
+      // Walking into the ladder (or the hatch from above) climbs it
+      const mv = C.move(), L = LADDERS[0];
+      if (mv.z > 0.4 && -Math.cos(P.yaw) < -0.6) {
+        if (P.f === L.f0 && Math.hypot(P.x - L.base.x, P.z - L.base.z) < 0.75) this.startClimb('up');
+        else if (P.f === L.f1 && Math.hypot(P.x - L.top.x, P.z - L.top.z) < 0.75) this.startClimb('down');
+      }
+    }
+    if (!this.climb && !frozen && C.enabled) {
       const look = C.consumeLook();
       P.yaw -= look.x * 0.0024;
       P.pitch = clamp(P.pitch - look.y * 0.0024, -1.35, 1.35);
@@ -860,36 +1204,67 @@ export class Game3D {
     } else {
       C.consumeLook();
     }
-    if (P.ground === undefined) P.ground = groundAt(P.x, P.z, P.f).y;
-    P.y = lerp(P.y, P.ground, Math.min(1, dt * 14));
-    if (Math.abs(P.y - P.ground) > 2) P.y = P.ground;
+    if (!this.climb) {
+      if (P.ground === undefined) P.ground = groundAt(P.x, P.z, P.f).y;
+      P.y = lerp(P.y, P.ground, Math.min(1, dt * 14));
+      if (Math.abs(P.y - P.ground) > 2) P.y = P.ground;
+    }
     const bob = this.headBob ? Math.sin(P.bob) * 0.035 : 0;
     this.camera.position.set(P.x, P.y + EYE + bob, P.z);
     this.camera.rotation.set(P.pitch, P.yaw, 0, 'YXZ');
+    this.camera.updateMatrixWorld();
+    this.frustum.setFromProjectionMatrix(this._pm.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
 
     this._updateWorld(dt);
+    this._updateViewModel(dt);
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     audio.setListener(this.camera.position, fwd);
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    if (this.vm.visible) { this.renderer.clearDepth(); this.renderer.render(this.vmScene, this.vmCamera); }
+  }
+
+  _updateViewModel(dt) {
+    const P = this.player, vm = this.vm;
+    vm.visible = !this.climb && !(this.frozen || this.me?.cg);
+    const m = this.controls.move();
+    const moving = Math.hypot(m.x, m.z) > 0.1;
+    this.vmSway = lerp(this.vmSway || 0, (P.yaw - (this.vmLastYaw ?? P.yaw)) / Math.max(dt, 1e-3), Math.min(1, dt * 8));
+    this.vmLastYaw = P.yaw;
+    const bx = moving ? Math.sin(P.bob * 0.5) * 0.012 : 0, by = moving ? Math.abs(Math.cos(P.bob * 0.5)) * 0.01 : Math.sin(this.time * 1.6) * 0.003;
+    vm.position.set(0.2 + bx + clamp(this.vmSway * 0.01, -0.03, 0.03), -0.175 + by - (this.torchOn ? 0 : 0.03), -0.38);
+    const lum = this.torchOn ? this.torch.intensity / 26 : 0;
+    this.vmLensMat.color.setRGB(0.15 + lum, 0.14 + lum * 0.93, 0.12 + lum * 0.8);
+    this.vmLight.intensity = 0.1 + 0.32 * lum;
   }
 
   _updateWorld(dt) {
     const t = this.time;
     // Torch & flicker
     this.flicker = Math.max(0, this.flicker - dt);
-    let ti = this.torchOn ? 26 : 0;
-    if (this.flicker > 0 && Math.random() < 0.45) ti *= Math.random() * 0.3;
     const near = this.entity ? this.entity.position.distanceTo(this.camera.position) : 99;
-    if (near < 8 && Math.random() < 0.25) ti *= Math.random();
-    this.torch.intensity = ti;
+    const tAmt = this.flicker > 0 ? 0.85 : near < 8 ? 0.6 * (1 - near / 8) : 0;
+    this.torch.intensity = (this.torchOn ? 26 : 0) * this.torchFlick.step(dt, tAmt, this.flicker > 0 ? 1.3 : 0.8);
     this.fill.intensity = this.torchOn ? 1.4 : 0.5;
+    const dip = this.globalFlick.step(dt, this.flicker > 0 ? 0.85 : 0, 1.2);
+    this.entityDim = lerp(this.entityDim, this.entity ? 0.35 : 1, Math.min(1, dt * 2));
     for (const r of this.roomLights) {
-      let i = r.base * (1 - r.flick * 0.25 + r.flick * 0.25 * Math.sin(t * (5 + r.flick * 9) + r.base));
-      if (r.flick && Math.random() < 0.01 * r.flick) i *= 0.2;
-      if (this.flicker > 0 && Math.random() < 0.5) i *= 0.15;
-      if (this.entity) i *= 0.35;
+      let k = r.fl.step(dt, r.fire ? 0.35 : r.flick * 0.12, r.fire ? 1.3 : 0.35);
+      // now and then a lamp browns out for half a second, smoothly
+      if (!r.fire && r.flick >= 0.2) {
+        r.dipT -= dt;
+        if (r.dipT <= 0) { r.dipT = rand(20, 50); r.dip = 0.6; }
+        if (r.dip > 0) { r.dip -= dt; k *= 1 - 0.7 * Math.sin(Math.PI * clamp(1 - r.dip / 0.6, 0, 1)); }
+      }
+      const i = r.base * k * dip * this.entityDim;
       r.l.intensity = i;
+      if (r.bulbMat) { const f = i / r.base; r.bulbMat.color.copy(r.bulbCol).multiplyScalar(0.25 + 0.75 * f); r.glow.material.opacity = f; }
     }
+    this._updateLightning(dt);
+    // fog tint per floor: greener basement, colder attic
+    const fogC = new THREE.Color(FOG[this.player.f]);
+    this.scene.fog.color.lerp(fogC, Math.min(1, dt * 1.5)); this.scene.background.copy(this.scene.fog.color);
+    if (this.dust.visible) this._updateDust(dt);
 
     // Attack visuals
     const vis = [...this.attackVis.values()];
@@ -928,10 +1303,12 @@ export class Game3D {
       g.position.x = lerp(g.position.x, o.tx, k); g.position.y = lerp(g.position.y, o.ty, k); g.position.z = lerp(g.position.z, o.tz, k);
       let dy = o.tyaw - g.rotation.y; while (dy > Math.PI) dy -= Math.PI * 2; while (dy < -Math.PI) dy += Math.PI * 2;
       g.rotation.y += dy * k;
-      o.stepAcc += Math.hypot(g.position.x - ox, g.position.z - oz);
+      const moved = Math.hypot(g.position.x - ox, g.position.z - oz);
+      o.speed = lerp(o.speed, moved / Math.max(dt, 1e-3), Math.min(1, dt * 8));
+      o.stepAcc += moved;
       if (o.stepAcc > 1.6) { o.stepAcc = 0; const df = Math.abs(o.f - myf); audio.play('step', { pos: g.position, vol: 0.4 * Math.pow(0.4, df), creaky: true }); }
-      g.userData.body.material.opacity = o.cg ? 0.3 : 1;
-      g.userData.body.material.transparent = !!o.cg;
+      this._animateAvatar(o, dt);
+      if (!!o.cg !== o.ghost) { o.ghost = !!o.cg; this._setGhostly(o, o.ghost); }
     }
 
     // Powerups bob/spin
@@ -949,12 +1326,20 @@ export class Game3D {
       const ud = E.userData;
       this.waveDress(ud.dress, t);
       ud.arms.forEach((a, i) => { a.rotation.x = -1.3 + Math.sin(t * 4 + i * 2) * 0.12; });
-      ud.head.rotation.z = Math.sin(t * 7) * 0.08 + (Math.random() < 0.03 ? rand(-0.5, 0.5) : 0);
-      E.visible = !(Math.random() < 0.04);
+      // occasional head jerk, held for a moment rather than jittering every frame
+      this.entityTwitch = (this.entityTwitch || 0) - dt;
+      if (this.entityTwitch <= 0) { this.entityTwitch = rand(1.2, 3); this.entityTilt = rand(-0.45, 0.45); }
+      ud.head.rotation.z = lerp(ud.head.rotation.z, (this.entityTwitch > rand(0.9, 1.1) ? this.entityTilt : 0) + Math.sin(t * 2) * 0.05, Math.min(1, dt * 12));
+      // she briefly blinks out of existence now and then
+      this.entityPhase -= dt;
+      if (this.entityPhase <= 0) { this.entityPhase = rand(1.5, 3.5); this.entityHidden = rand(0.06, 0.12); }
+      this.entityHidden -= dt;
+      E.visible = this.entityHidden <= 0;
       this.entityLight.position.set(E.position.x, E.position.y + 1.5, E.position.z);
       const dist = E.position.distanceTo(this.camera.position);
       this.entityDist = dist;
-      if (mv.length() > 0.001 && Math.random() < dt * 2) audio.play('step', { pos: E.position, vol: 0.5 });
+      this.entityStepT -= dt;
+      if (mv.length() > 0.002 && this.entityStepT <= 0) { this.entityStepT = 5; audio.play('running', { pos: E.position, vol: 0.9 }); }
     } else this.entityDist = 99;
 
     // Rocking chairs, clock, mannequins
@@ -970,10 +1355,9 @@ export class Game3D {
       if (mq.it.f !== this.player.f) continue;
       const dx = this.player.x - mq.it.x, dz = this.player.z - mq.it.z;
       const look = Math.atan2(dx, dz);
-      // Only turns its head when you're not looking at it
-      const toM = new THREE.Vector3(-dx, 0, -dz).normalize();
-      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion); fwd.y = 0; fwd.normalize();
-      if (fwd.dot(toM) < 0.2) mq.head.rotation.y = look - mq.grp.rotation.y;
+      // Only turns its head while it's off-screen
+      const hp = new THREE.Vector3(); mq.head.getWorldPosition(hp);
+      if (!this.frustum.intersectsSphere(new THREE.Sphere(hp, 0.4))) mq.head.rotation.y = look - mq.grp.rotation.y;
     }
     // Portraits that change when you look away
     if (Math.random() < dt * 0.6) {
@@ -983,7 +1367,7 @@ export class Game3D {
         const to = p.pos.clone().sub(this.camera.position);
         const d = to.length();
         if (d > 12) continue;
-        const looking = fwd.dot(to.normalize()) > 0.55;
+        const looking = this.frustum.intersectsSphere(new THREE.Sphere(p.pos, p.big ? 1.1 : 0.7));
         if (!looking && Math.random() < 0.18) { p.alt = !p.alt; p.mat.map = TX.portrait(p.v, p.alt); p.mat.needsUpdate = true; }
       }
     }
@@ -1008,6 +1392,42 @@ export class Game3D {
     this._phone(dt);
   }
 
+  // Lightning beyond the windows: an instant flash that dies away, then thunder
+  _updateLightning(dt) {
+    this.lightT -= dt;
+    if (this.lightT <= 0) {
+      this.lightT = rand(45, 95);
+      if (!this.entity && this.running) {
+        this.lightTime = 0;
+        setTimeout(() => audio.play('thunder', { vol: 0.8, dur: rand(3.5, 5) }), rand(600, 1800));
+      }
+    }
+    let f = 0;
+    if (this.lightTime >= 0) {
+      this.lightTime += dt;
+      for (const [at, peak] of [[0, 1], [0.22, 0.6], [0.5, 0.35]]) if (this.lightTime >= at) f = Math.max(f, peak * Math.exp(-(this.lightTime - at) * 7));
+      if (this.lightTime > 2) this.lightTime = -1;
+    }
+    if (Math.abs(f - this.flash) < 0.002 && f === 0) return;
+    this.flash = f;
+    for (const m of this.backdrops) m.color.setScalar(1 + f * 2.6);
+    for (const m of this.shafts) m.opacity = 0.07 * (1 + f * 5);
+    this.ambient.intensity = 0.45 + f * 0.45;
+  }
+
+  _updateDust(dt) {
+    const a = this.dust.geometry.attributes.position, p = a.array, v = this.dustVel;
+    const cx = this.camera.position.x, cy = this.camera.position.y, cz = this.camera.position.z;
+    const t = this.time;
+    for (let i = 0; i < p.length; i += 3) {
+      p[i] += (v[i] + Math.sin(t * 0.3 + i) * 0.02) * dt; p[i + 1] += v[i + 1] * dt; p[i + 2] += (v[i + 2] + Math.cos(t * 0.27 + i) * 0.02) * dt;
+      if (p[i] - cx > 6) p[i] -= 12; else if (p[i] - cx < -6) p[i] += 12;
+      if (p[i + 2] - cz > 6) p[i + 2] -= 12; else if (p[i + 2] - cz < -6) p[i + 2] += 12;
+      if (p[i + 1] - cy > 1.2) p[i + 1] -= 3.4; else if (p[i + 1] - cy < -2.2) p[i + 1] += 3.4;
+    }
+    a.needsUpdate = true;
+  }
+
   _ambientScares(dt) {
     if (!this.running) return;
     this.scareCooldown -= dt;
@@ -1015,26 +1435,34 @@ export class Game3D {
     this.scareCooldown = rand(35, 75);
     const r = Math.random();
     const P = this.player;
-    if (r < 0.4) {
+    if (r < 0.3) {
       // Glimpse of her at the end of your torch beam
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion); fwd.y = 0; fwd.normalize();
       const ray = new THREE.Raycaster(new THREE.Vector3(P.x, P.y + 1.2, P.z), fwd, 0.5, 14);
       const hit = ray.intersectObjects(this.wallMeshes, false)[0];
       const d = hit ? hit.distance - 0.6 : 12;
       if (d < 4) return;
-      const w = this.makeWoman();
+      const w = this.glimpse || (this.glimpse = this.makeWoman());
+      w.visible = true;
       w.position.set(P.x + fwd.x * d, P.y, P.z + fwd.z * d);
       w.rotation.y = Math.atan2(-fwd.x, -fwd.z);
       this.scene.add(w);
       this.flicker = 0.6;
       audio.play('whisper', { pos: w.position, vol: 0.7 });
       setTimeout(() => { this.scene.remove(w); this.flicker = 0.4; }, 380 + Math.random() * 250);
-    } else if (r < 0.65) {
-      // Footsteps on the floor above
+    } else if (r < 0.58) {
+      // Footsteps crossing the floor above you
       const above = { x: P.x + rand(-3, 3), y: P.y + 3.6, z: P.z + rand(-3, 3) };
-      let i = 0;
-      const iv = setInterval(() => { audio.play('step', { pos: above, vol: 0.9, creaky: true, muffle: 0.5 }); above.x += 0.7; if (++i > 6) clearInterval(iv); }, 520);
+      audio.play('footsteps', { pos: above, vol: 0.9, muffle: 0.45, window: 6 });
+    } else if (r < 0.7) {
+      // A child crying somewhere else in the house
+      const far = { x: rand(-12, 12), y: FLOORS[(P.f + 1 + Math.floor(Math.random() * 3)) % 4].y + 1.2, z: rand(-8, 8) };
+      audio.play('crying', { pos: far, vol: 0.7, muffle: 0.4 });
     } else if (r < 0.8) {
+      // Singing from the nursery (close by if you're upstairs)
+      const cot = { x: -12.5, y: FLOORS[2].y + 1, z: 7 };
+      audio.play('singing', { pos: cot, vol: P.f === 2 ? 0.9 : 0.6, muffle: P.f === 2 ? 0 : 0.5 });
+    } else if (r < 0.9) {
       audio.play('whisper', { pos: { x: P.x + rand(-1.5, 1.5), y: P.y + 1.6, z: P.z + rand(-1.5, 1.5) }, vol: 0.6 });
     } else {
       audio.play('creak', { pos: { x: P.x + rand(-6, 6), y: P.y + 1, z: P.z + rand(-6, 6) }, vol: 0.7 });
@@ -1074,6 +1502,10 @@ export class Game3D {
     }
     if (best) return best;
     if (this.phone.ringing && P.f === 1 && Math.hypot(P.x - this.phonePos.x, P.z - this.phonePos.z) < 2.2) return { type: 'phone' };
+    for (const L of LADDERS) {
+      if (P.f === L.f0 && Math.hypot(P.x - L.base.x, P.z - L.base.z) < 1.3) return { type: 'ladder', dir: 'up' };
+      if (P.f === L.f1 && Math.hypot(P.x - L.top.x, P.z - L.top.z) < 1.3) return { type: 'ladder', dir: 'down' };
+    }
     for (const n of this.notes) {
       if (n.f !== P.f) continue;
       const d = Math.hypot(P.x - n.x, P.z - n.z);
@@ -1104,6 +1536,8 @@ export class Game3D {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    this.vmCamera.aspect = w / h;
+    this.vmCamera.updateProjectionMatrix();
   }
 
   start() {

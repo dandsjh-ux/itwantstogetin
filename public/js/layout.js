@@ -93,6 +93,7 @@ export function groundAt(x, z, floor) {
 // ---------------------------------------------------------------------------
 // Walls (y0/y1 relative to floor). collide walls block movement in xz.
 export const WALLS = [];
+export const DOORWAYS = []; // open interior doorways (for door casings)
 
 function wall(f, dir, fixed, a1, a2, openings = [], o = {}) {
   const H = o.h ?? FLOORS[f].h;
@@ -113,6 +114,7 @@ function wall(f, dir, fixed, a1, a2, openings = [], o = {}) {
     if (b > 0) push(s, e, 0, b, b > 0.3 || !!op.solid);
     if (top < H) push(s, e, top, H, false);
     if (op.solid) push(s, e, 0, H, true, false); // invisible blocker (closed window/door)
+    else if (!o.rail) DOORWAYS.push({ f, dir, fixed, c: op.c, w: op.w, t: top, thick: t });
     cur = e;
   }
   push(cur, a2, 0, H, true);
@@ -172,6 +174,27 @@ for (const s of STAIRS) {
 // Holes in floor slabs (the floor that the stair arrives at)
 export const FLOOR_HOLES = STAIRS.map((s) => ({ f: s.f1, x1: s.x1, x2: s.x2, z1: s.z1, z2: s.z2 }));
 
+// Pull-down attic ladder on the first-floor landing, right by the top of the main stairs.
+// Climbed with an animation rather than walked like a ramp.
+export const LADDERS = [{
+  id: 'attic_ladder', f0: 2, f1: 3, x: 3.2,
+  base: { x: 3.2, z: 0.0 },          // where you stand on the landing to climb up
+  top: { x: 3.2, z: -0.2 },          // where you stand in the attic to climb down
+  foot: -0.6, head: -1.55,           // z of the ladder's feet and where it meets the attic floor
+  hole: { x1: 2.7, x2: 3.7, z1: -1.85, z2: -0.55 },
+}];
+for (const L of LADDERS) {
+  const h = L.hole;
+  FLOOR_HOLES.push({ f: L.f1, ...h });
+  // attic: railing on three sides, and an invisible blocker over the opening itself
+  wall(L.f1, 'z', h.x1, h.z1, h.z2, [], { t: 0.08, h: 0.9, rail: true, mat: 'rail' });
+  wall(L.f1, 'z', h.x2, h.z1, h.z2, [], { t: 0.08, h: 0.9, rail: true, mat: 'rail' });
+  wall(L.f1, 'x', h.z1, h.x1, h.x2, [], { t: 0.08, h: 0.9, rail: true, mat: 'rail' });
+  WALLS.push({ f: L.f1, x1: h.x1, x2: h.x2, z1: h.z1, z2: h.z2, y0: 0, y1: 1, collide: true, visible: false, mat: 'rail', rail: true });
+  // landing: the ladder itself is solid
+  WALLS.push({ f: L.f0, x1: h.x1 + 0.05, x2: h.x2 - 0.05, z1: h.z1, z2: L.foot, y0: 0, y1: 3, collide: true, visible: false, mat: 'rail', rail: true });
+}
+
 // ---------------------------------------------------------------------------
 export const ROOMS = [
   { f: 0, name: 'Cellar', x1: -14, z1: 0, x2: 14, z2: 10 },
@@ -217,7 +240,7 @@ export const POWERUP_SPOTS = [
   { f: 1, x: -9, z: 4 }, { f: 1, x: -10, z: -7 }, { f: 1, x: 5, z: -4 }, { f: 1, x: 11, z: -6 },
   { f: 1, x: 2.8, z: 8.8 }, { f: 1, x: 11, z: 3 }, { f: 1, x: -3, z: -7 },
   { f: 2, x: -8, z: 5 }, { f: 2, x: 8, z: 4 }, { f: 2, x: -10, z: -6 }, { f: 2, x: -2, z: -6 },
-  { f: 2, x: 5.5, z: -4 }, { f: 2, x: 2, z: -0.5 },
+  { f: 2, x: 5.5, z: -4 }, { f: 2, x: -5, z: -0.5 },
   { f: 3, x: -10, z: 5 }, { f: 3, x: 4, z: -4 }, { f: 3, x: 9, z: 3 }, { f: 3, x: -1, z: -6 },
 ];
 
@@ -306,6 +329,7 @@ export const PORTRAITS = [
 ];
 
 export const WRITINGS = [
+  { f: 2, x: 4.6, z: -1.84, rot: 0, y: 2.3, text: 'ATTIC ↑', color: '#cfcfcf', size: 0.55 },
   { f: 0, x: -1, z: 0.16, rot: 0, y: 1.6, text: 'SHE CANNOT CROSS SALT', color: '#dcdcdc', size: 1.0 },
   { f: 0, x: -13.84, z: -6, rot: H, y: 1.4, text: 'COUNT THE KNOCKS', color: '#7a1010', size: 0.8 },
   { f: 1, x: -4, z: -9.84, rot: 0, y: 1.7, text: "DON'T LET HER IN", color: '#7a1010', size: 1.0 },

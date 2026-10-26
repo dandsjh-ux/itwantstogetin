@@ -32,45 +32,27 @@ Optional environment variable: `MIN_PLAYERS` (default `2`).
 
 > On Render's free plan the service sleeps when idle, so the first visit can take ~30 seconds to wake up.
 
-## Adding your music and sound effects
+## Music and sound effects
 
-Copy your MP3 files into **`public/audio/`**. The game lists that folder on startup and matches each
-file to a role using keywords in its filename:
+The MP3s in **`public/audio/`** are mapped to game moments by `public/audio/manifest.json`, which can
+also cut a clip out of a longer file (`start`/`end` in seconds), set its volume, or muffle music
+(`filter` in Hz). With the current files:
 
-| Role | Used for | Filename keywords |
-|---|---|---|
-| `menu` | Title screen and lobby music | menu, title, start, intro, theme, main |
-| `game` | In-game background loop | ambient, background, bgm, game, loop, house, music, drone, atmos, tension |
-| `breach` | Chase music while it's inside | chase, breach, hunt, danger, intense, panic, run |
-| `win` / `lose` | Results screen | win, victory, dawn, safe / lose, lost, gameover, death, dead, fail, ending |
-| `knock` | Knocking at doors (positional) | knock, door, bang |
-| `scream` | Breaches and jump scares | scream, shriek, jump, scare, sting |
-| `whisper` | Whispers at entrances and phone call | whisper, voice, breath, laugh, giggle, hum, sing, lullaby |
-| `cue` | Alert when a new attack starts | alert, cue, warning, bell, chime, alarm, notify, ding |
+| File | Used for |
+|---|---|
+| Ambience Background Soundtrack | In-game music loop; also the title screen and lobby, muffled as if heard through a wall |
+| Door Knock Sound Effect | Split into its two knock bursts: knocking at door attacks (positional), the cutscene's "something outside" line, and the title screen when the hand presses the glass |
+| Glass Breaking | When it breaks in through a window or skylight, and the final word of the title sequence |
+| Chilling Creepy Doll Voice Whisper | Whispers at windows and hatches, the cutscene's "And…", the phone call, and glimpses of her |
+| A Young Girl Crying | Distant crying somewhere in the house, the cutscene's "parents" line, and the losing screen |
+| Creepy Little Girl Singing | Singing drifting from the nursery, and sometimes when the silhouette appears on the title screen |
+| Creepy Footsteps (& Running) | Walking section: footsteps crossing the floor above you. Running section: her feet while she hunts you during a breach |
 
-Files that don't match any keyword are still used: tracks longer than 40 seconds become extra
-background music, and shorter ones become random tension stingers.
-
-To control this exactly, add `public/audio/manifest.json`:
-
-```json
-{
-  "menu": "title theme.mp3",
-  "game": ["house ambience.mp3", "creepy loop 2.mp3"],
-  "breach": "chase.mp3",
-  "win": "dawn.mp3",
-  "lose": "game over.mp3",
-  "knock": ["knock1.mp3", "knock2.mp3"],
-  "scream": "scream.mp3",
-  "whisper": "whispers.mp3",
-  "cue": "alert.mp3",
-  "stinger": ["sting1.mp3", "sting2.mp3"]
-}
-```
-
-Any role without a file falls back to sound generated in the browser (knocks, scratching, glass
-taps, whispers, creaks, heartbeat, a detuned music-box lullaby, a low drone, and chase music), so the
-game always has sound.
+Anything without a file uses sound generated in the browser (tapping, scratching, creaks, gurgling
+drains, heartbeat, thunder, chase music, a music-box lullaby for the win screen). To add more files,
+drop them in the folder and either add them to `manifest.json` or name them with a keyword:
+menu, ambient/background (game music), chase, win, lose, knock, scream, whisper, crying, singing,
+footsteps, running, glass, alert.
 
 ## How to play
 
@@ -107,7 +89,7 @@ game always has sound.
 | F | Torch |
 | M | Map |
 | T | Call for help |
-| P | Menu and options (sensitivity, volume, drag-to-look, head bob) |
+| P | Menu and options (sensitivity, volume, drag-to-look, head bob, graphics quality) |
 
 No right-clicks are needed. On tablets you get a joystick, a drag-to-look area and big buttons.
 
@@ -138,12 +120,20 @@ word|definition|synonym1,synonym2|antonym|Sentence with ___ for the word.|catego
 
 Four floors: **Basement** (cellar, storage, coal room, boiler room), **Ground** (hall, living room,
 dining room, kitchen, study), **First** (landing, nursery, master bedroom, bathroom, your bedroom,
-back room) and **Attic**. There are 24 entrances, from the front door and cat flap to the coal chute,
+back room) and **Attic**. The attic is reached by the pull-down ladder on the first-floor landing
+(next to the top of the main stairs, marked "ATTIC ↑"; walk into it or press E to climb) or by the
+narrow stairs in the back room. There are 24 entrances, from the front door and cat flap to the coal chute,
 floor drain, boiler flue, fireplace, balcony door, roof hatch and skylight. The layout lives in
 `public/js/layout.js` and is shared by the client and the server.
 
 Look out for portraits that change when you're not looking, notes and diary pages that tell the
 story of Eleanor Vane, writing on the walls, the dollhouse, the telephone, and the bathroom mirror…
+
+## Graphics settings
+
+"High quality graphics" (on by default on computers, off on tablets) adds torch shadows and floating
+dust. Turn it off in the P menu if a computer struggles. Everything else (lighting, moonlight,
+lightning, cobwebs, film grain) is cheap and always on.
 
 ## Project structure
 

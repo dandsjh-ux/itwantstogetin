@@ -4,7 +4,7 @@ import { Controls, isTouch } from './controls.js';
 import { Game3D } from './game3d.js';
 import * as TX from './textures.js';
 import {
-  ENTRANCES, FLOORS, ROOMS, WALLS, STAIRS, SALT_CIRCLES, PLAYER_COLORS, POWERUP_TYPES,
+  ENTRANCES, FLOORS, ROOMS, WALLS, STAIRS, LADDERS, SALT_CIRCLES, PLAYER_COLORS, POWERUP_TYPES,
   entranceInteractPoint, roomAt,
 } from './layout.js';
 
@@ -17,7 +17,7 @@ const S = {
   myId: null, code: null, lobby: null, settings: null, mode: 'menu', game: null, state: null,
   quiz: null, players: [], hostId: null, lastPrompt: '', overlay: null, phase: 'menu', hintsOn: true,
 };
-const opts = Object.assign({ sens: 1, turn: 2, music: 0.55, sfx: 0.85, drag: false, bob: true }, (() => { try { return JSON.parse(localStorage.getItem('iwtgi_opts') || '{}'); } catch { return {}; } })());
+const opts = Object.assign({ sens: 1, turn: 2, music: 0.55, sfx: 0.85, drag: false, bob: true, quality: isTouch ? 'low' : 'high' }, (() => { try { return JSON.parse(localStorage.getItem('iwtgi_opts') || '{}'); } catch { return {}; } })());
 const saveOpts = () => { try { localStorage.setItem('iwtgi_opts', JSON.stringify(opts)); } catch {} };
 
 // ---------------------------------------------------------------------------
@@ -38,8 +38,14 @@ function toast(t, ms = 2200) {
   clearTimeout(toast.t); toast.t = setTimeout(() => (el.style.display = 'none'), ms);
 }
 
-const bg = new StartScreen($('#bg'), (ev) => { if (ev === 'thump') audio.play('knock', { count: 1, vol: 0.5 }); });
+// Title screen: a knock when the hand presses the glass; sometimes she sings when she appears
+const bg = new StartScreen($('#bg'), (ev) => {
+  if (S.phase !== 'menu' && S.phase !== 'lobby') return;
+  if (ev === 'thump') audio.play('knock', { vol: 0.55, file: true, reverb: true });
+  if (ev === 'appear' && Math.random() < 0.35) audio.play('singing', { vol: 0.35, muffle: 0.55 });
+});
 bg.start();
+$('#grain').style.backgroundImage = `url(${TX.grainDataURL()})`;
 const controls = new Controls(document.getElementById('game-root'));
 controls.sens = opts.sens; controls.turnSpeed = opts.turn; controls.dragMode = opts.drag;
 
@@ -183,7 +189,7 @@ socket.on('gameStarting', (d) => {
   audio.stopMusic(2);
   bg.stop();
   if (!S.game) {
-    S.game = new Game3D(document.getElementById('game-root'), controls, {});
+    S.game = new Game3D(document.getElementById('game-root'), controls, { quality: opts.quality });
   } else resetGameWorld();
   S.game.headBob = opts.bob;
   S.game.setPlayers(d.players, S.myId);
@@ -211,7 +217,12 @@ function runCutscene() {
   let t = 600;
   audio.play('rumble', { vol: 0.6, dur: 3 });
   lines.forEach((l, i) => {
-    at(t, () => { txt.textContent = l; txt.classList.add('show'); if (i === 2) audio.play('knock', { count: 3, vol: 0.6, file: false }); if (i === 3) audio.play('whisper', { vol: 0.8, file: false }); });
+    at(t, () => {
+      txt.textContent = l; txt.classList.add('show');
+      if (i === 1) audio.play('crying', { vol: 0.45, muffle: 0.35 });
+      if (i === 2) audio.play('knock', { vol: 0.9, file: true });
+      if (i === 3) audio.play('whisper', { vol: 1 });
+    });
     at(t + (i === 3 ? 2200 : 3000), () => txt.classList.remove('show'));
     t += i === 3 ? 3400 : 4200;
   });
@@ -221,7 +232,7 @@ function runCutscene() {
       const d = document.createElement('div'); d.textContent = w; ttl.appendChild(d);
       requestAnimationFrame(() => d.classList.add('show'));
       audio.play('knock', { count: 1, vol: 1, file: false });
-      if (i === words.length - 1) { d.classList.add('shake'); audio.play('stinger', { vol: 1 }); }
+      if (i === words.length - 1) { d.classList.add('shake'); audio.play('stinger', { vol: 1 }); audio.play('glass', { vol: 0.7 }); }
     });
   });
   at(t + words.length * 650 + 2600, showRules);
@@ -366,6 +377,7 @@ function hudFrame() {
     } else if (it.type === 'pickup') txt = `${key} Pick up ${POWERUP_TYPES[it.p.t].name}`;
     else if (it.type === 'note') txt = `${key} Read: ${it.n.title}`;
     else if (it.type === 'phone') txt = `${key} Answer the phone…`;
+    else if (it.type === 'ladder') txt = it.dir === 'up' ? `${key} Climb the ladder to the Attic` : `${key} Climb down the ladder`;
   }
   if (!txt && S.me?.inv.plank && !S.overlay) {
     const pt = g.getPlankTarget();
@@ -407,13 +419,21 @@ function compassTarget() {
   if (!best) return null;
   if (best.e.f === P.f) return { x: best.ip.x, z: best.ip.z, label: best.e.name };
   const up = best.e.f > P.f;
-  const st = STAIRS.find((s) => (up ? s.f0 === P.f : s.f1 === P.f));
-  if (!st) return null;
-  // stair entry point on my floor
-  const lowEnd = (st.axis === 'x') ? { x: st.low === 'min' ? st.x1 - 0.5 : st.x2 + 0.5, z: (st.z1 + st.z2) / 2 } : { x: (st.x1 + st.x2) / 2, z: st.low === 'min' ? st.z1 - 0.5 : st.z2 + 0.5 };
-  const highEnd = (st.axis === 'x') ? { x: st.low === 'min' ? st.x2 + 0.5 : st.x1 - 0.5, z: (st.z1 + st.z2) / 2 } : { x: (st.x1 + st.x2) / 2, z: st.low === 'min' ? st.z2 + 0.5 : st.z1 - 0.5 };
-  const p = up ? lowEnd : highEnd;
-  return { ...p, label: `${up ? '↑ Upstairs' : '↓ Downstairs'} to the ${best.e.name}` };
+  // every way off this floor in the right direction: stair ends and the attic ladder
+  const routes = [];
+  for (const st of STAIRS.filter((s) => (up ? s.f0 === P.f : s.f1 === P.f))) {
+    const lowEnd = (st.axis === 'x') ? { x: st.low === 'min' ? st.x1 - 0.5 : st.x2 + 0.5, z: (st.z1 + st.z2) / 2 } : { x: (st.x1 + st.x2) / 2, z: st.low === 'min' ? st.z1 - 0.5 : st.z2 + 0.5 };
+    const highEnd = (st.axis === 'x') ? { x: st.low === 'min' ? st.x2 + 0.5 : st.x1 - 0.5, z: (st.z1 + st.z2) / 2 } : { x: (st.x1 + st.x2) / 2, z: st.low === 'min' ? st.z2 + 0.5 : st.z1 - 0.5 };
+    routes.push({ ...(up ? lowEnd : highEnd), how: up ? '↑ Upstairs' : '↓ Downstairs' });
+  }
+  for (const L of LADDERS) {
+    if (up && L.f0 === P.f) routes.push({ ...L.base, how: '↑ Up the ladder' });
+    if (!up && L.f1 === P.f) routes.push({ ...L.top, how: '↓ Down the ladder' });
+  }
+  if (!routes.length) return null;
+  routes.sort((a, b) => Math.hypot(P.x - a.x, P.z - a.z) - Math.hypot(P.x - b.x, P.z - b.z));
+  const r = routes[0];
+  return { x: r.x, z: r.z, label: `${r.how} to the ${best.e.name}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -446,7 +466,11 @@ socket.on('entityPush', (d) => S.game?.pushAttack(d.e));
 socket.on('breach', (d) => {
   const e = eById[d.e];
   if (S.quiz) closeQuiz(false);
-  audio.play('glass', { vol: 1 });
+  const A = entranceInteractPoint(e);
+  const at = { x: A.x, y: A.y + 1.4, z: A.z };
+  if (e.kind === 'window' || e.kind === 'skylight') audio.play('glass', { pos: at, vol: 1.3 });
+  else audio.play('bang', { pos: at, vol: 1.3 });
+  audio.play('glass', { vol: 0.5 });
   audio.play('scream', { vol: 1 });
   S.game.flicker = 2.5;
   if (d.final) { notify(`It came through the ${e.name}. The last ward is broken.`, 'attack'); jumpscare(); return; }
@@ -509,9 +533,10 @@ controls.on('interact', () => {
   if (it.type === 'attack') { if (!it.a.by || it.a.by === S.myId) socket.emit('interact', { attackId: it.a.id }); }
   else if (it.type === 'pickup') socket.emit('pickup', { id: it.p.id });
   else if (it.type === 'note') openNote(it.n.title, it.n.text, it.n);
+  else if (it.type === 'ladder') S.game.startClimb(it.dir);
   else if (it.type === 'phone') {
     S.game.answerPhone();
-    audio.play('whisper', { vol: 1, file: false, dur: 2.5 });
+    audio.play('whisper', { vol: 1, file: true });
     openNote('The telephone', "Static. Then breathing.\n\nA woman's voice, very close: \"Your mother says it's alright, sweetheart. She says you can let me in now.\"\n\n\"Just open the door.\"\n\nThe line goes dead.");
   }
 });
@@ -558,6 +583,7 @@ $('#btn-note-close').onclick = () => overlay(null);
 socket.on('quiz', (q) => {
   S.quiz = q;
   overlay('quiz');
+  audio.muffle(1400);
   $('#quiz-title').textContent = `Banishing: ${q.entrance}`;
   $('#quiz-steps').innerHTML = Array.from({ length: q.required }, (_, i) => `<i class="${i < q.step ? 'done' : ''}"></i>`).join('');
   $('#quiz-flavour').textContent = q.flavour;
@@ -614,6 +640,7 @@ $('#btn-charm').onclick = useCharm;
 function closeQuiz(sendQuit) {
   if (sendQuit && S.quiz) socket.emit('quitQuiz');
   S.quiz = null;
+  audio.muffle(null);
   if (S.overlay === 'quiz') overlay(null);
 }
 $('#btn-quiz-close').onclick = () => closeQuiz(true);
@@ -646,6 +673,12 @@ function drawMap() {
   for (const w of WALLS.filter((w) => w.f === mapFloor && w.visible && w.y0 < 1.2)) g.fillRect(X(w.x1), ZZ(w.z1), Math.max(2, (w.x2 - w.x1) * sc), Math.max(2, (w.z2 - w.z1) * sc));
   g.font = '12px Inter, sans-serif'; g.textAlign = 'center'; g.fillStyle = '#a89c8c';
   for (const r of ROOMS.filter((r) => r.f === mapFloor)) g.fillText(r.name, X((r.x1 + r.x2) / 2), ZZ((r.z1 + r.z2) / 2) + 4);
+  for (const L of LADDERS.filter((l) => l.f0 === mapFloor || l.f1 === mapFloor)) {
+    const h = L.hole;
+    g.fillStyle = 'rgba(200,170,90,0.85)'; g.fillRect(X(h.x1), ZZ(h.z1), (h.x2 - h.x1) * sc, (h.z2 - h.z1) * sc);
+    g.fillStyle = '#fff'; g.font = 'bold 11px Inter';
+    g.fillText(L.f0 === mapFloor ? '↑ Attic ladder' : '↓ Ladder', X((h.x1 + h.x2) / 2), ZZ(h.z2) + 14);
+  }
   for (const s of STAIRS.filter((s) => s.f0 === mapFloor || s.f1 === mapFloor)) {
     g.fillStyle = 'rgba(122,106,74,0.7)'; g.fillRect(X(s.x1), ZZ(s.z1), (s.x2 - s.x1) * sc, (s.z2 - s.z1) * sc);
     g.fillStyle = '#fff'; g.font = 'bold 11px Inter';
@@ -686,7 +719,7 @@ function drawMap() {
 // Pause / options
 function openPause() {
   $('#opt-sens').value = opts.sens; $('#opt-turn').value = opts.turn; $('#opt-music').value = opts.music; $('#opt-sfx').value = opts.sfx;
-  $('#opt-drag').checked = opts.drag; $('#opt-bob').checked = opts.bob;
+  $('#opt-drag').checked = opts.drag; $('#opt-bob').checked = opts.bob; $('#opt-quality').checked = opts.quality === 'high';
   overlay('pause');
 }
 $('#opt-sens').oninput = (e) => { opts.sens = +e.target.value; controls.sens = opts.sens; saveOpts(); };
@@ -695,6 +728,7 @@ $('#opt-music').oninput = (e) => { opts.music = +e.target.value; audio.setVolume
 $('#opt-sfx').oninput = (e) => { opts.sfx = +e.target.value; audio.setVolumes(opts.music, opts.sfx); saveOpts(); };
 $('#opt-drag').onchange = (e) => { opts.drag = e.target.checked; controls.dragMode = opts.drag; saveOpts(); };
 $('#opt-bob').onchange = (e) => { opts.bob = e.target.checked; if (S.game) S.game.headBob = opts.bob; saveOpts(); };
+$('#opt-quality').onchange = (e) => { opts.quality = e.target.checked ? 'high' : 'low'; S.game?.setQuality(opts.quality); saveOpts(); };
 $('#btn-resume').onclick = () => overlay(null);
 $('#btn-fullscreen').onclick = () => { if (!document.fullscreenElement) document.documentElement.requestFullscreen?.(); else document.exitFullscreen?.(); };
 $('#btn-quit').onclick = () => { if (confirm('Leave the game? Your team will have to survive without you.')) leaveRoom(); };
@@ -732,6 +766,7 @@ socket.on('gameOver', (d) => {
     S.game?.stop();
     audio.stopAllLoops();
     audio.playMusic(d.win ? 'win' : 'lose');
+    if (!d.win) setTimeout(() => audio.play('crying', { vol: 0.7 }), 1500);
   }, d.win ? 1200 : 2600);
 });
 $('#btn-again').onclick = () => socket.emit('backToLobby');
@@ -752,3 +787,5 @@ socket.on('disconnect', () => {
   if (S.phase !== 'menu') { toast('Connection lost. Returning to the menu…', 4000); S.phase = 'menu'; endGameView(); show('menu'); bg.start(); }
 });
 
+// Test hook: only on a local dev server, never on the deployed site
+if (location.hostname === 'localhost' && new URLSearchParams(location.search).has('debug')) { window.__S = S; window.__sock = socket; }

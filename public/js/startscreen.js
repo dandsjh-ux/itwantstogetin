@@ -30,7 +30,7 @@ export class StartScreen {
         const r = Math.random();
         this.variant = r < 0.45 ? 'stand' : r < 0.7 ? 'side' : r < 0.88 ? 'close' : 'hand';
         this.side = Math.random() < 0.5 ? -1 : 1;
-        if (this.variant === 'hand') this.onEvent('thump');
+        this.onEvent(this.variant === 'hand' ? 'thump' : 'appear');
         break;
       }
       case 'in': this.state = 'hold'; this.stateT = 2.5 + Math.random() * 3; break;
