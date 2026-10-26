@@ -1,0 +1,19 @@
+{
+  "name": "it-wants-to-get-in",
+  "version": "1.0.0",
+  "description": "Multiplayer first-person horror vocabulary game (Three.js + Socket.IO)",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "MIN_PLAYERS=1 node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "three": "^0.160.0"
+  }
+}

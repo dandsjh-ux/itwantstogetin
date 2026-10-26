@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>It Wants To Get In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">{ "imports": { "three": "/vendor/three/three.module.min.js", "three/addons/": "/vendor/three-addons/" } }</script>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div id="game-root"></div>
+
+<!-- Gate: first click unlocks audio -->
+<section id="gate" class="screen active">
+  <div class="gate-inner">
+    <div class="title-small">IT WANTS TO GET IN</div>
+    <div class="blink">Click or tap to enter</div>
+    <div class="gate-tip">Best with headphones. Lights off.</div>
+  </div>
+</section>
+
+<!-- Main menu -->
+<section id="menu" class="screen">
+  <div class="menu-panel">
+    <h1 class="logo">IT <span>WANTS</span> TO GET IN</h1>
+    <p class="tag">A vocabulary horror game for 2–6 players</p>
+    <label class="field"><span>Your name</span><input id="name" maxlength="16" placeholder="Enter your name" autocomplete="off"></label>
+    <div class="menu-row">
+      <button id="btn-create" class="btn big">Host a game</button>
+    </div>
+    <div class="or">— or join a friend —</div>
+    <div class="menu-row join-row">
+      <input id="join-code" maxlength="4" placeholder="CODE" autocomplete="off" autocapitalize="characters">
+      <button id="btn-join" class="btn">Join</button>
+    </div>
+    <div id="menu-error" class="error"></div>
+  </div>
+</section>
+
+<!-- Lobby -->
+<section id="lobby" class="screen">
+  <div class="lobby-wrap">
+    <div class="lobby-left">
+      <div class="code-label">House code</div>
+      <div id="room-code" class="room-code">----</div>
+      <div class="code-hint">Players join at <b id="join-url"></b> with this code</div>
+      <h3>Players <span id="player-count"></span></h3>
+      <ul id="player-list"></ul>
+      <div class="color-pick-label">Your colour</div>
+      <div id="color-pick"></div>
+    </div>
+    <div class="lobby-right">
+      <h3>Game settings <span id="host-only" class="muted"></span></h3>
+      <div id="settings" class="settings"></div>
+      <div class="lobby-actions">
+        <button id="btn-start" class="btn big">Start game</button>
+        <button id="btn-leave" class="btn ghost">Leave</button>
+      </div>
+      <div id="lobby-msg" class="muted"></div>
+    </div>
+  </div>
+</section>
+
+<!-- Cutscene -->
+<section id="cutscene" class="screen">
+  <div id="cut-text"></div>
+  <div id="cut-title"></div>
+  <button id="btn-skip" class="btn ghost small skip">Skip ▸</button>
+</section>
+
+<!-- Rules -->
+<section id="rules" class="screen">
+  <div class="rules-panel">
+    <h2>How to survive the night</h2>
+    <div class="rules-grid">
+      <div class="rule"><div class="ri">🔔</div><div><b>Listen for attacks.</b> A warning pops up when it tries to get in — through a window, door, chimney, drain, hatch… Rush there!</div></div>
+      <div class="rule"><div class="ri">📖</div><div><b>Banish it with words.</b> At the entrance, press <kbd>E</kbd> (or <b>Interact</b>) and answer the vocabulary spell. Wrong answers let it push closer.</div></div>
+      <div class="rule"><div class="ri">⏳</div><div><b>Beat the timer.</b> Each attack has a timer. If it runs out, <b>it gets in</b> and a ward breaks.</div></div>
+      <div class="rule"><div class="ri">🧂</div><div><b>If it gets in, hide in a salt circle</b> until it leaves. If it catches you, the team loses a banishment.</div></div>
+      <div class="rule"><div class="ri">🎒</div><div><b>Grab items:</b> salt shakers, planks to board up entrances, adrenaline, spirit compass, lavender charms, blessed candles.</div></div>
+      <div class="rule"><div class="ri">🏆</div><div><b>Win</b> by banishing it <b id="rules-target">10</b> times before time runs out. Lose if every ward breaks or time runs out.</div></div>
+    </div>
+    <div id="rules-controls" class="controls-help"></div>
+    <div class="rules-foot">
+      <button id="btn-ready" class="btn big">I'm ready</button>
+      <div id="ready-state" class="muted"></div>
+    </div>
+  </div>
+</section>
+
+<!-- HUD -->
+<section id="hud" class="screen">
+  <div id="hud-top">
+    <div id="hud-timer">10:00</div>
+    <div id="hud-banish"><span class="lbl">BANISHED</span> <span id="hud-bcount">0/10</span><div id="hud-bbar"><i></i></div></div>
+    <div id="hud-wards"></div>
+  </div>
+  <div id="attack-list"></div>
+  <div id="hud-right">
+    <button id="btn-map" class="hbtn" title="Map (M)">🗺️</button>
+    <button id="btn-pause" class="hbtn" title="Menu (Esc / P)">☰</button>
+  </div>
+  <div id="team-list"></div>
+  <div id="compass"><div class="arrow">➤</div><div class="clabel"></div></div>
+  <div id="crosshair"></div>
+  <div id="prompt"></div>
+  <div id="location"></div>
+  <div id="inventory"></div>
+  <div id="keyhints"></div>
+  <div id="breach-banner"></div>
+  <div id="notifications"></div>
+  <div id="click-to-look">Click to look around (or use ← → keys)</div>
+  <div id="vignette"></div>
+  <div id="frost"></div>
+  <div id="caught-overlay"><div>IT FOUND YOU</div><small>Recovering…</small></div>
+</section>
+
+<!-- Touch controls -->
+<div id="touch">
+  <div id="joy"><div id="joy-knob"></div></div>
+  <div id="look-zone"></div>
+  <div id="touch-buttons">
+    <button data-act="interact" class="tbtn main">✋<span>Interact</span></button>
+    <button data-act="run" class="tbtn">🏃<span>Run</span></button>
+    <button data-act="salt" class="tbtn">🧂<span>Salt</span></button>
+    <button data-act="plank" class="tbtn">🪵<span>Plank</span></button>
+    <button data-act="torch" class="tbtn">🔦<span>Torch</span></button>
+  </div>
+</div>
+
+<!-- Quiz -->
+<section id="quiz" class="overlay">
+  <div class="quiz-card">
+    <div class="quiz-head">
+      <div id="quiz-title">Banishing spell</div>
+      <div id="quiz-steps"></div>
+    </div>
+    <div id="quiz-timer"><i></i></div>
+    <div id="quiz-flavour"></div>
+    <div id="quiz-prompt"></div>
+    <div id="quiz-focus"></div>
+    <div id="quiz-sub"></div>
+    <div id="quiz-options"></div>
+    <div id="quiz-feedback"></div>
+    <div class="quiz-foot">
+      <button id="btn-charm" class="btn small">🌿 Use charm (C)</button>
+      <button id="btn-quiz-close" class="btn ghost small">Step away (Esc)</button>
+    </div>
+  </div>
+</section>
+
+<!-- Note reader -->
+<section id="note" class="overlay">
+  <div class="paper">
+    <h3 id="note-title"></h3>
+    <div id="note-text"></div>
+    <button id="btn-note-close" class="btn small">Close (E / Esc)</button>
+  </div>
+</section>
+
+<!-- Map -->
+<section id="map" class="overlay">
+  <div class="map-card">
+    <div class="map-tabs" id="map-tabs"></div>
+    <canvas id="map-canvas" width="700" height="520"></canvas>
+    <div class="map-legend"><span class="lg you"></span>You <span class="lg mate"></span>Team <span class="lg atk"></span>Attack <span class="lg salt"></span>Salt circle <span class="lg stair"></span>Stairs</div>
+    <button id="btn-map-close" class="btn small">Close (M)</button>
+  </div>
+</section>
+
+<!-- Pause / options -->
+<section id="pause" class="overlay">
+  <div class="pause-card">
+    <h2>Paused?</h2>
+    <p class="muted">The house doesn't stop. Neither does it.</p>
+    <label class="opt">Look sensitivity <input type="range" id="opt-sens" min="0.2" max="3" step="0.1"></label>
+    <label class="opt">Turn speed (← → keys) <input type="range" id="opt-turn" min="0.5" max="4" step="0.1"></label>
+    <label class="opt">Music volume <input type="range" id="opt-music" min="0" max="1" step="0.05"></label>
+    <label class="opt">Sound effects <input type="range" id="opt-sfx" min="0" max="1" step="0.05"></label>
+    <label class="opt chk"><input type="checkbox" id="opt-drag"> Drag-to-look (hold click & drag instead of locking the mouse)</label>
+    <label class="opt chk"><input type="checkbox" id="opt-bob"> Head bob</label>
+    <div id="pause-controls" class="controls-help"></div>
+    <div class="pause-actions">
+      <button id="btn-resume" class="btn">Resume</button>
+      <button id="btn-fullscreen" class="btn ghost">Fullscreen</button>
+      <button id="btn-quit" class="btn ghost danger">Leave game</button>
+    </div>
+  </div>
+</section>
+
+<!-- Results -->
+<section id="results" class="screen">
+  <div class="results-panel">
+    <h1 id="res-title"></h1>
+    <p id="res-story"></p>
+    <div id="res-summary"></div>
+    <table id="res-table"></table>
+    <div class="res-cols">
+      <div><h3>Words to review</h3><ul id="res-review" class="wordlist"></ul></div>
+      <div><h3>Your mastered words</h3><ul id="res-mastered" class="wordlist good"></ul></div>
+    </div>
+    <div class="res-actions">
+      <button id="btn-again" class="btn big">Back to lobby</button>
+      <button id="btn-res-leave" class="btn ghost">Main menu</button>
+    </div>
+    <div id="res-wait" class="muted"></div>
+  </div>
+</section>
+
+<div id="scare"></div>
+<div id="fade"></div>
+<div id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
