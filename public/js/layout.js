@@ -275,8 +275,8 @@ export const FURNITURE = [
   { t: 'fireplace', f: 1, x: 13.55, z: 5 }, { t: 'sofa', f: 1, x: 9.5, z: 4.8, r: 1 }, { t: 'armchair', f: 1, x: 12, z: 1.4 },
   { t: 'armchair', f: 1, x: 12.2, z: 8.6 }, { t: 'piano', f: 1, x: 4.6, z: 5, r: 1 },
   { t: 'table', f: 1, x: -9, z: 5 }, { t: 'chair', f: 1, x: -10, z: 3.9 }, { t: 'chair', f: 1, x: -8, z: 3.9 },
-  { t: 'chair', f: 1, x: -10, z: 6.1 }, { t: 'chair', f: 1, x: -8, z: 6.1 }, { t: 'bookshelf', f: 1, x: -9, z: 0.4 },
-  { t: 'clock', f: 1, x: -3.5, z: 4 }, { t: 'phone', f: 1, x: 3.5, z: 3 },
+  { t: 'chair', f: 1, x: -10, z: 6.1 }, { t: 'chair', f: 1, x: -8, z: 6.1, creepy: true }, { t: 'bookshelf', f: 1, x: -9, z: 0.4 },
+  { t: 'clock', f: 1, x: -3.5, z: 4 }, { t: 'smalltable', f: 1, x: -13.2, z: 9.2 }, { t: 'phone', f: 1, x: 3.5, z: 3 },
   { t: 'counter', f: 1, x: -9.6, z: -9.5 }, { t: 'stove', f: 1, x: -4.5, z: -9.5 }, { t: 'fridge', f: 1, x: -0.6, z: -8.5, r: 1 },
   { t: 'table', f: 1, x: -5, z: -4.5, r: 1 }, { t: 'counter', f: 1, x: -13.5, z: -1.8, r: 1 },
   { t: 'desk', f: 1, x: 11, z: -1, r: 2 }, { t: 'bookshelf', f: 1, x: 13.6, z: -4, r: 1 }, { t: 'bookshelf', f: 1, x: 7, z: -0.4 },
@@ -342,7 +342,12 @@ export const WRITINGS = [
   { f: 3, x: -13.84, z: 6.5, rot: H, y: 1.3, text: 'never say yes', color: '#6a1010', size: 0.7 },
 ];
 
+// The music box in the corner of the dining room. Winding it brings her straight in.
+export const MUSIC_BOX = { f: 1, x: -13.2, z: 9.2, y: 0.762 };
+
 export const NOTES = [
+  { f: 1, x: -12.9, y: 0.77, z: 8.95, id: 'musicbox_note', title: 'A note tucked under the music box',
+    text: "DO NOT PLAY IT.\n\nWhatever you do. Whatever you hear.\n\nShe wound it every night for her children, and they never came home to hear it.\nIf she hears it playing again, she will come straight in to find them." },
   { f: 1, x: 3.3, y: 0.82, z: 3.2, title: 'Note on the telephone table',
     text: "Gone to fetch Father Aldous from the village. Back before midnight, we promise.\n\nThe salt circles are fresh. If anything knocks — ANYTHING — do not answer. Do not say yes.\n\nLove, Mum & Dad\n\nP.S. Lock the cat flap." },
   { f: 1, x: -9, y: 0.8, z: 5.2, title: 'A torn diary page',

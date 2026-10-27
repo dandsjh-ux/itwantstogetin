@@ -570,6 +570,41 @@ export class AudioSys {
     let i = 0;
     const iv = setInterval(() => { this.s_step({ ...o, vol: (o.vol || 1) * 0.8 }); if (++i > 8) clearInterval(iv); }, 230);
   }
+  s_musicbox(o) {
+    if (this._file('musicbox', { ...o, wet: o.wet ?? 0.6 })) return;
+    // fallback: a slow detuned lullaby
+    const ctx = this.ctx, out = this._out({ ...o, wet: 0.7 });
+    [76, 79, 83, 81, 79, 76, 74, 76, 79, 76].forEach((m, i) => {
+      const t = ctx.currentTime + i * 0.55, f = 440 * Math.pow(2, (m - 69) / 12) * (1 + (Math.random() - 0.5) * 0.015);
+      const os = ctx.createOscillator(); os.type = 'sine'; os.frequency.value = f;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 1.4);
+      os.connect(g); g.connect(out); os.start(t); os.stop(t + 1.5);
+    });
+  }
+  // A few wrong, heavy notes from an untouched piano
+  s_piano(o) {
+    const ctx = this.ctx, out = this._out({ ...o, wet: 0.9 });
+    const pool = [40, 43, 44, 47, 48, 51, 52, 55];
+    const n = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < n; i++) {
+      const t = ctx.currentTime + i * (0.5 + Math.random() * 0.5);
+      const f = 440 * Math.pow(2, (pool[Math.floor(Math.random() * pool.length)] - 69) / 12);
+      for (const [mul, a] of [[1, 0.3], [2, 0.12], [3.01, 0.05], [4.2, 0.02]]) {
+        const os = ctx.createOscillator(); os.type = mul === 1 ? 'triangle' : 'sine'; os.frequency.value = f * mul;
+        const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(a, t + 0.008); g.gain.exponentialRampToValueAtTime(0.001, t + 2.6);
+        os.connect(g); g.connect(out); os.start(t); os.stop(t + 2.7);
+      }
+    }
+  }
+  s_roll(o) {
+    const ctx = this.ctx, out = this._out({ ...o, wet: 0.3 }), t = ctx.currentTime, d = o.dur || 2.5;
+    const s = this._noiseSrc(t, d);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 260;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.7, t + 0.2); g.gain.linearRampToValueAtTime(0, t + d);
+    for (let i = 1; i < d * 8; i++) g.gain.setValueAtTime(0.4 + Math.random() * 0.4 * (1 - i / (d * 8)), t + i / 8);
+    s.connect(lp); lp.connect(g); g.connect(out);
+  }
+
   s_thunder(o) {
     const ctx = this.ctx, out = this._out({ ...o, wet: 1 }), t = ctx.currentTime, d = o.dur || 4;
     const s = this._noiseSrc(t, Math.min(1.9, d));
@@ -587,6 +622,8 @@ export class AudioSys {
     const n = ctx.createBufferSource(); n.buffer = this.noise; n.loop = true;
     const f = ctx.createBiquadFilter();
     if (kind === 'wind') { f.type = 'bandpass'; f.frequency.value = 500; f.Q.value = 0.8; }
+    else if (kind === 'static') { f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 0.6; }
+    else if (kind === 'water') { f.type = 'bandpass'; f.frequency.value = 1700; f.Q.value = 1.4; }
     else { f.type = 'lowpass'; f.frequency.value = 220; }
     const lfo = ctx.createOscillator(); lfo.frequency.value = 0.2 + Math.random() * 0.3;
     const lg = ctx.createGain(); lg.gain.value = 300; lfo.connect(lg); lg.connect(f.frequency); lfo.start();

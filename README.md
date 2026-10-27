@@ -46,6 +46,7 @@ also cut a clip out of a longer file (`start`/`end` in seconds), set its volume,
 | Chilling Creepy Doll Voice Whisper | Whispers at windows and hatches, the cutscene's "And…", the phone call, and glimpses of her |
 | A Young Girl Crying | Distant crying somewhere in the house, the cutscene's "parents" line, and the losing screen |
 | Creepy Little Girl Singing | Singing drifting from the nursery, and sometimes when the silhouette appears on the title screen |
+| music_box.mp3 (shadow Bonnie music box) | The music box in the dining room: when someone winds it, and short tinkles by itself |
 | Creepy Footsteps (& Running) | Walking section: footsteps crossing the floor above you. Running section: her feet while she hunts you during a breach |
 
 Anything without a file uses sound generated in the browser (tapping, scratching, creaks, gurgling
@@ -125,6 +126,19 @@ back room) and **Attic**. The attic is reached by the pull-down ladder on the fi
 narrow stairs in the back room. There are 24 entrances, from the front door and cat flap to the coal chute,
 floor drain, boiler flue, fireplace, balcony door, roof hatch and skylight. The layout lives in
 `public/js/layout.js` and is shared by the client and the server.
+
+**The music box.** In the far corner of the dining room sits a music box with a note: *"DO NOT PLAY IT."*
+Players have to read the note before they can wind it. Winding it plays the tune through the house,
+and two seconds later she smashes in through the dining room side window: an instant breach that
+breaks a ward. It can only be wound once per game.
+
+**Uncanny happenings.** Rocking chairs that rock only when nobody is watching; a dining chair that
+turns to face you; wet footprints that appear one by one from the front door to the stairs; words
+that write themselves on walls behind you; a ball that rolls out of the nursery towards you; the
+piano playing wrong notes; the kitchen wireless crackling into whispers; bath taps running on their
+own; hanging lamps that start to sway; "LET ME IN" breathed onto the bathroom mirror; and the music
+box tinkling a few notes by itself. Each has its own trigger, and every 35–70 seconds one of them
+also fires at random wherever the player is.
 
 Look out for portraits that change when you're not looking, notes and diary pages that tell the
 story of Eleanor Vane, writing on the walls, the dollhouse, the telephone, and the bathroom mirror…

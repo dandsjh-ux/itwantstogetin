@@ -1,15 +1,75 @@
 {
   "_comment": "Maps the MP3s in this folder to game roles. start/end are seconds within the file; vol is 0-1; filter muffles music (Hz).",
-  "game": [{ "file": "Ambience Background Soundtrack.mp3", "vol": 0.9 }],
-  "menu": [{ "file": "Ambience Background Soundtrack.mp3", "start": 150, "vol": 0.8, "filter": 900 }],
-  "knock": [
-    { "file": "Door Knock Sound Effect.mp3", "start": 0.6, "end": 2.1 },
-    { "file": "Door Knock Sound Effect.mp3", "start": 2.85, "end": 4.6 }
+  "game": [
+    {
+      "file": "Ambience Background Soundtrack.mp3",
+      "vol": 0.9
+    }
   ],
-  "glass": [{ "file": "Glass Breaking Sound Effect HD Glass Shattering Sound Effect.mp3", "start": 0.6 }],
-  "whisper": [{ "file": "Chilling Creepy Doll Voice Whisper (Free Sound Effect) - no copyright SFX.mp3" }],
-  "crying": [{ "file": "A Young Girl Crying (Free SFX).mp3", "start": 0.2, "end": 7.2 }],
-  "singing": [{ "file": "Creepy little girl singing - Sound Effect #horror #creepy #shorts #girl #scary.mp3", "start": 0.4, "end": 7.7 }],
-  "footsteps": [{ "file": "CREEPY FOOTSTEPS (& RUNNING), HORROR SOUND EFFECT -FREE.mp3", "start": 4.5, "end": 30 }],
-  "running": [{ "file": "CREEPY FOOTSTEPS (& RUNNING), HORROR SOUND EFFECT -FREE.mp3", "start": 31.5, "end": 36.8 }]
+  "menu": [
+    {
+      "file": "Ambience Background Soundtrack.mp3",
+      "start": 150,
+      "vol": 0.8,
+      "filter": 900
+    }
+  ],
+  "knock": [
+    {
+      "file": "Door Knock Sound Effect.mp3",
+      "start": 0.6,
+      "end": 2.1
+    },
+    {
+      "file": "Door Knock Sound Effect.mp3",
+      "start": 2.85,
+      "end": 4.6
+    }
+  ],
+  "glass": [
+    {
+      "file": "Glass Breaking Sound Effect HD Glass Shattering Sound Effect.mp3",
+      "start": 0.6
+    }
+  ],
+  "whisper": [
+    {
+      "file": "Chilling Creepy Doll Voice Whisper (Free Sound Effect) - no copyright SFX.mp3"
+    }
+  ],
+  "crying": [
+    {
+      "file": "A Young Girl Crying (Free SFX).mp3",
+      "start": 0.2,
+      "end": 7.2
+    }
+  ],
+  "singing": [
+    {
+      "file": "Creepy little girl singing - Sound Effect #horror #creepy #shorts #girl #scary.mp3",
+      "start": 0.4,
+      "end": 7.7
+    }
+  ],
+  "footsteps": [
+    {
+      "file": "CREEPY FOOTSTEPS (& RUNNING), HORROR SOUND EFFECT -FREE.mp3",
+      "start": 4.5,
+      "end": 30
+    }
+  ],
+  "running": [
+    {
+      "file": "CREEPY FOOTSTEPS (& RUNNING), HORROR SOUND EFFECT -FREE.mp3",
+      "start": 31.5,
+      "end": 36.8
+    }
+  ],
+  "musicbox": [
+    {
+      "file": "music_box.mp3",
+      "start": 0.5,
+      "end": 17.6
+    }
+  ]
 }

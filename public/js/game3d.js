@@ -4,7 +4,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
   FLOORS, WALLS, STAIRS, FLOOR_HOLES, ENTRANCES, FURNITURE, FURN_SIZES, furnitureBox, PORTRAITS, WRITINGS, NOTES,
   SALT_CIRCLES, PLAYER_R, groundAt, roomAt, entranceAnchor, entranceInteractPoint, INTERACT_RANGE, POWERUP_TYPES,
-  LADDERS, DOORWAYS, ROOMS,
+  LADDERS, DOORWAYS, ROOMS, MUSIC_BOX,
 } from './layout.js';
 import * as TX from './textures.js';
 import { audio } from './audio.js';
@@ -275,6 +275,7 @@ export class Game3D {
     this._buildDecor();
     this._buildSalt();
     this._buildAtmosphere();
+    this._buildUncanny();
     // Static outdoors silhouettes: trees seen through windows
     const treeMat = new THREE.MeshBasicMaterial({ color: 0x020304 });
     for (let i = 0; i < 24; i++) {
@@ -451,7 +452,7 @@ export class Game3D {
         const rk = new THREE.Group(); grp.add(rk);
         B(w, 0.06, d * 0.6, M.wood, 0, 0.45, 0, rk); B(w, 0.7, 0.05, M.wood, 0, 0.85, -d * 0.3, rk).rotation.x = -0.2;
         for (const sx of [-1, 1]) { const r = new THREE.Mesh(new THREE.TorusGeometry(0.9, 0.025, 4, 16, 0.9), M.wood); r.rotation.set(0, Math.PI / 2, Math.PI * 1.5 - 0.45); r.position.set(sx * (w / 2 - 0.05), 0.92, 0); rk.add(r); B(0.04, 0.42, 0.04, M.wood, sx * (w / 2 - 0.05), 0.24, 0.2, rk); B(0.04, 0.42, 0.04, M.wood, sx * (w / 2 - 0.05), 0.24, -0.2, rk); }
-        (this.rockers = this.rockers || []).push({ rk, ph: rand(0, 6) });
+        (this.rockers = this.rockers || []).push({ rk, ph: rand(0, 6), f: it.f, amp: 0.05, pos: new THREE.Vector3(it.x, FLOORS[it.f].y + 0.6, it.z) });
         break;
       }
       case 'trunk': B(w, h * 0.75, d, M.wood, 0, h * 0.375, 0); B(w + 0.02, h * 0.25, d + 0.02, M.darkwood, 0, h * 0.875, 0); B(0.1, 0.1, 0.03, M.brass, 0, h * 0.7, d / 2 + 0.01); break;
@@ -475,7 +476,8 @@ export class Game3D {
       case 'fireplace': break;
       default: B(w, h, d, M.wood, 0, h / 2, 0);
     }
-    if (['rocker', 'clock', 'mannequin', 'dollhouse'].includes(it.t)) {
+    if (it.creepy) (this.creepyChairs = this.creepyChairs || []).push({ grp, it, rest: grp.rotation.y });
+    if (['rocker', 'clock', 'mannequin', 'dollhouse'].includes(it.t) || it.creepy) {
       grp.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
       this.scene.add(grp);
       return;
@@ -561,12 +563,16 @@ export class Game3D {
       if (!r.bulb) continue;
       const p = r.l.position, F = FLOORS[floorOfY(p.y)];
       const ceil = F.y + F.h;
-      const cord = new THREE.Mesh(boxGeo(0.012, ceil - p.y - 0.06, 0.012, 1), this.mats.cord); cord.position.set(p.x, (ceil + p.y + 0.06) / 2, p.z); this.scene.add(cord);
+      // cord, bulb and glow hang from a pivot so the lamp can sway
+      const len = ceil - p.y;
+      r.pivot = new THREE.Group(); r.pivot.position.set(p.x, ceil, p.z); this.scene.add(r.pivot);
+      r.len = len; r.swing = 0; r.swingT = rand(25, 60); r.ph = rand(0, 6);
+      const cord = new THREE.Mesh(boxGeo(0.012, len - 0.06, 0.012, 1), this.mats.cord); cord.position.y = -(len - 0.06) / 2; r.pivot.add(cord);
       r.bulbMat = new THREE.MeshBasicMaterial({ color: r.l.color.clone().multiplyScalar(1.4) });
       r.bulbCol = r.bulbMat.color.clone();
-      const b = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), r.bulbMat); b.position.copy(p); this.scene.add(b);
+      const b = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), r.bulbMat); b.position.y = -len; r.pivot.add(b);
       r.glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: TX.radial('rgba(255,220,160,0.55)', 'rgba(255,200,120,0)'), blending: THREE.AdditiveBlending, depthWrite: false }));
-      r.glow.scale.set(0.9, 0.9, 1); r.glow.position.copy(p); this.scene.add(r.glow);
+      r.glow.scale.set(0.9, 0.9, 1); r.glow.position.y = -len; r.pivot.add(r.glow);
     }
     // cobwebs strung across upper room corners
     const webMat = new THREE.MeshBasicMaterial({ map: TX.cobweb(), transparent: true, alphaTest: 0.08, side: THREE.DoubleSide, depthWrite: false, color: 0x9a9a9a });
@@ -623,7 +629,7 @@ export class Game3D {
     const mf = new THREE.Mesh(boxGeo(0.7, 0.9, 0.03, 1), this.mats.gold); mf.position.set(-8, FLOORS[2].y + 1.6, -9.865); this.scene.add(mf);
     const ghost = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.42), new THREE.MeshBasicMaterial({ map: TX.womanFace(), transparent: true, opacity: 0 }));
     ghost.position.set(-7.85, FLOORS[2].y + 1.62, -9.82); this.scene.add(ghost);
-    this.mirror = { pos: new THREE.Vector3(-8, FLOORS[2].y + 1.6, -9.85), ghost, t: 0, cd: 0 };
+    this.mirror = { pos: new THREE.Vector3(-8, FLOORS[2].y + 1.6, -9.85), ghost, t: 0, cd: 0, count: 0 };
 
     this.notes = NOTES.map((n) => {
       const m = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.28), new THREE.MeshLambertMaterial({ map: TX.paper(), emissive: 0x222018 }));
@@ -1343,7 +1349,7 @@ export class Game3D {
     } else this.entityDist = 99;
 
     // Rocking chairs, clock, mannequins
-    for (const r of this.rockers || []) r.rk.rotation.x = Math.sin(t * 1.4 + r.ph) * 0.12;
+
     if (this.clockObj) {
       const c = this.clockObj;
       c.pend.rotation.z = Math.sin(t * Math.PI) * 0.18;
@@ -1382,13 +1388,17 @@ export class Game3D {
       const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
       if (to.length() < 3.5 && fwd.dot(to.normalize()) > 0.85) {
         mr.cd = 40;
-        if (Math.random() < 0.6) { mr.t = 0.35; audio.play('stinger', { vol: 0.8 }); this.flicker = 0.5; }
+        if (Math.random() < 0.6) {
+          mr.t = 0.35; audio.play('stinger', { vol: 0.8 }); this.flicker = 0.5;
+          if (++mr.count >= 2) this.unc.mirrorText.material.opacity = 0.75;
+        }
       }
     }
     // Dollhouse figure creeps closer to the tiny front door over the game
     if (this.dollFig && this.state) { const prog = clamp(this.state.b / Math.max(1, this.state.tg), 0, 1); this.dollFig.position.x = 0.35 - (1 - prog) * 0.0 - prog * 0.35; }
 
     this._ambientScares(dt);
+    this._updateUncanny(dt);
     this._phone(dt);
   }
 
@@ -1506,12 +1516,271 @@ export class Game3D {
       if (P.f === L.f0 && Math.hypot(P.x - L.base.x, P.z - L.base.z) < 1.3) return { type: 'ladder', dir: 'up' };
       if (P.f === L.f1 && Math.hypot(P.x - L.top.x, P.z - L.top.z) < 1.3) return { type: 'ladder', dir: 'down' };
     }
+    const mbNote = this.notes.find((n) => n.id === 'musicbox_note');
+    if (P.f === MUSIC_BOX.f && Math.hypot(P.x - MUSIC_BOX.x, P.z - MUSIC_BOX.z) < 1.9) {
+      if (!mbNote.read) return { type: 'note', n: mbNote, d: 0 };
+      if (!s.mb && !this.entity) return { type: 'musicbox' };
+    }
     for (const n of this.notes) {
       if (n.f !== P.f) continue;
       const d = Math.hypot(P.x - n.x, P.z - n.z);
       if (d <= 1.9 && (!best || d < best.d)) best = { type: 'note', n, d };
     }
     return best;
+  }
+
+  // ------------------------------------------------------------------ uncanny happenings
+  _buildUncanny() {
+    const u = this.unc = {};
+    const M = this.mats, F1 = FLOORS[1].y, F2 = FLOORS[2].y;
+    // Music box on the corner table in the dining room, with a tiny dancer inside
+    const mb = new THREE.Group(); mb.position.set(MUSIC_BOX.x - 0.08, F1 + MUSIC_BOX.y, MUSIC_BOX.z + 0.05); mb.rotation.y = 0.6;
+    const base = new THREE.Mesh(boxGeo(0.24, 0.11, 0.17, 1), M.darkwood); base.position.y = 0.055; mb.add(base);
+    const inlay = new THREE.Mesh(boxGeo(0.2, 0.012, 0.13, 1), new THREE.MeshLambertMaterial({ color: 0x5a1020 })); inlay.position.y = 0.111; mb.add(inlay);
+    const lid = new THREE.Group(); lid.position.set(0, 0.11, -0.085); mb.add(lid);
+    const lidBox = new THREE.Mesh(boxGeo(0.24, 0.025, 0.17, 1), M.darkwood); lidBox.position.set(0, 0.0125, 0.085); lid.add(lidBox);
+    const mirror = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.12), new THREE.MeshBasicMaterial({ color: 0x3a4450 })); mirror.rotation.x = Math.PI / 2; mirror.position.set(0, -0.001, 0.085); lid.add(mirror);
+    for (const [x, z] of [[-0.12, -0.085], [0.12, -0.085], [-0.12, 0.085], [0.12, 0.085]]) { const k = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 6), M.brass); k.position.set(x, 0.006, z); mb.add(k); }
+    const key = new THREE.Mesh(boxGeo(0.01, 0.05, 0.035, 1), M.brass); key.position.set(0.13, 0.06, 0); mb.add(key);
+    const dancer = new THREE.Group(); dancer.position.y = 0.105; dancer.visible = false; mb.add(dancer);
+    const skirt = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.03, 10), new THREE.MeshLambertMaterial({ color: 0xe8e2e2, emissive: 0x222222 })); skirt.position.y = 0.04; dancer.add(skirt);
+    const bodyD = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.008, 0.04, 6), M.white); bodyD.position.y = 0.07; dancer.add(bodyD);
+    const headD = new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 6), M.white); headD.position.y = 0.097; dancer.add(headD);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.03, 4), M.white); leg.position.y = 0.012; dancer.add(leg);
+    mb.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    this.scene.add(mb);
+    u.box = { grp: mb, lid, dancer, open: 0, playing: 0, key };
+
+    // Wet footprints leading in from the front door to the stairs, appearing while you aren't looking
+    u.prints = [];
+    const pmat = TX.footprint();
+    for (let i = 0; i < 7; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.25), new THREE.MeshBasicMaterial({ map: pmat, transparent: true, opacity: 0, depthWrite: false }));
+      m.rotation.x = -Math.PI / 2; m.rotation.z = (i % 2 ? -0.08 : 0.08);
+      if (i % 2) m.scale.x = -1;
+      m.position.set((i % 2 ? 0.13 : -0.13) + Math.sin(i) * 0.04, F1 + 0.014, 9.3 - i * 0.48);
+      m.renderOrder = 1;
+      this.scene.add(m);
+      u.prints.push(m);
+    }
+    // Words that write themselves on walls when your back is turned
+    const ghostText = (text, x, y, z, rot, f, size = 0.8) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(2.6 * size, 0.65 * size), new THREE.MeshLambertMaterial({ map: TX.writing(text, '#6e0a0a'), transparent: true, opacity: 0, depthWrite: false }));
+      m.position.set(x, FLOORS[f].y + y, z); m.rotation.y = rot; m.renderOrder = 1;
+      this.scene.add(m);
+      return { m, f, state: 'hidden', t: 0, cd: rand(60, 120) };
+    };
+    const H = Math.PI / 2;
+    u.writings = [
+      ghostText('BEHIND YOU', 3.84, 1.6, 2.6, -H, 1, 0.75),
+      ghostText('SHE IS IN THE WALLS', -13.0, 1.5, -1.84, 0, 2, 0.7),
+      ghostText('WHY DID YOU LET HER IN', 13.84, 1.5, 4.0, -H, 0, 0.75),
+      ghostText('GIVE THEM BACK', 6.0, 1.3, -9.84, 0, 3, 0.8),
+    ];
+    // "LET ME IN" breathed onto the bathroom mirror
+    u.mirrorText = new THREE.Mesh(new THREE.PlaneGeometry(0.55, 0.14), new THREE.MeshBasicMaterial({ map: TX.writing('LET ME IN', '#c8d4dc'), transparent: true, opacity: 0, depthWrite: false }));
+    u.mirrorText.position.set(-8, FLOORS[2].y + 1.72, -9.81); this.scene.add(u.mirrorText);
+    // A child's ball in the nursery that rolls out to meet you
+    u.ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 12), new THREE.MeshLambertMaterial({ color: 0x8a1c1c }));
+    u.ball.castShadow = true; u.ball.visible = false; this.scene.add(u.ball);
+    // An old wireless on the kitchen counter that tunes itself
+    const radio = new THREE.Group(); radio.position.set(-11.2, F1 + 0.945, -9.45);
+    const rb = new THREE.Mesh(boxGeo(0.34, 0.22, 0.15, 1), M.darkwood); rb.position.y = 0.11; radio.add(rb);
+    const grille = new THREE.Mesh(new THREE.CircleGeometry(0.06, 14), M.black); grille.position.set(-0.07, 0.12, 0.076); radio.add(grille);
+    u.dialMat = new THREE.MeshBasicMaterial({ color: 0x302010 });
+    const dial = new THREE.Mesh(new THREE.CircleGeometry(0.035, 14), u.dialMat); dial.position.set(0.09, 0.12, 0.076); radio.add(dial);
+    radio.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    this.scene.add(radio);
+    u.radioPos = { x: -11.2, y: F1 + 1.05, z: -9.45 };
+    u.pianoPos = { x: 4.6, y: F1 + 0.9, z: 5 };
+    u.sinkPos = { x: -8, y: F2 + 0.9, z: -9.5 };
+    this.resetUncanny();
+  }
+
+  resetUncanny() {
+    const u = this.unc;
+    if (!u) return;
+    this.runTime = 0;
+    u.box.open = 0; u.box.playing = 0; u.box.lid.rotation.x = 0; u.box.dancer.visible = false;
+    u.prints.forEach((m) => (m.material.opacity = 0)); u.printIdx = 0; u.printT = 0;
+    u.writings.forEach((w) => { w.state = 'hidden'; w.m.material.opacity = 0; w.cd = rand(50, 110); });
+    u.mirrorText.material.opacity = 0; this.mirror.count = 0;
+    u.ball.visible = false; u.ballDone = false; u.ballRoll = null;
+    u.pianoCd = rand(30, 60); u.radioCd = rand(20, 50); u.radioOn = 0; u.tapsCd = 10; u.dirT = rand(40, 70);
+    for (const c of this.creepyChairs || []) c.grp.rotation.y = c.rest;
+    for (const n of this.notes || []) n.read = false;
+  }
+
+  // Fire one uncanny event by name. Returns false if it can't happen right now.
+  _uncanny(kind) {
+    const u = this.unc, P = this.player;
+    const dist = (p) => Math.hypot(P.x - p.x, P.z - p.z);
+    switch (kind) {
+      case 'piano': u.pianoCd = rand(70, 120); audio.play('piano', { pos: u.pianoPos, vol: 0.9, muffle: P.f === 1 ? 0 : 0.5 }); return true;
+      case 'radio':
+        if (u.radioOn > 0) return false;
+        u.radioCd = rand(60, 110); u.radioOn = 4.5;
+        audio.loop('radio', 'static', u.radioPos, P.f === 1 ? 0.35 : 0.5);
+        setTimeout(() => audio.play('whisper', { pos: u.radioPos, vol: 0.9, file: true }), 900);
+        setTimeout(() => audio.stopLoop('radio'), 4500);
+        return true;
+      case 'taps':
+        u.tapsCd = rand(50, 80);
+        audio.loop('taps', 'water', u.sinkPos, P.f === 2 ? 0.4 : 0.6);
+        setTimeout(() => audio.stopLoop('taps'), 6000);
+        return true;
+      case 'lamp': {
+        const lamps = this.roomLights.filter((r) => r.pivot && floorOfY(r.pivot.position.y - 0.5) === P.f);
+        if (!lamps.length) return false;
+        const r = lamps.sort((a, b) => dist(a.pivot.position) - dist(b.pivot.position))[0];
+        r.swing = 0.38; audio.play('creak', { pos: r.pivot.position, vol: 0.4, dur: 0.8 }); this.flicker = 0.4;
+        return true;
+      }
+      case 'writing': {
+        const w = u.writings.filter((w) => w.state === 'hidden' && w.f === P.f && this._unseen(w.m.position, 1.2))[0];
+        if (!w) return false;
+        w.state = 'shown'; w.t = 0;
+        audio.play('scratch', { pos: w.m.position, vol: 0.5, dur: 1.4 });
+        return true;
+      }
+      case 'ball':
+        if (u.ballRoll && u.ballRoll.s < u.ballRoll.len) return false;
+        u.ballDone = false; u.ball.visible = false; // it'll roll out again next time someone's in the nursery
+        if (P.f !== 2) audio.play('roll', { pos: { x: -12.6, y: FLOORS[2].y + 0.2, z: 8.6 }, vol: 1, muffle: 0.5 });
+        return true;
+      case 'prints':
+        if (u.printIdx < u.prints.length) return false;
+        u.prints.forEach((m) => { m.material.opacity = 0; m.userData.fade = 0; }); u.printIdx = 0; u.printT = 2;
+        return true;
+      case 'musicbox': {
+        // a few notes on its own — just a taste; it hasn't been wound
+        if (this.state?.mb || u.box.playing > 0) return false;
+        const bp = u.box.grp.position;
+        audio.play('musicbox', { pos: { x: bp.x, y: bp.y + 0.1, z: bp.z }, vol: 0.8, window: 2.5, muffle: P.f === 1 ? 0 : 0.5 });
+        u.box.playing = 2.5;
+        return true;
+      }
+      case 'rocker': {
+        const r = (this.rockers || []).filter((r) => r.f === P.f)[0] || (this.rockers || [])[0];
+        if (!r) return false;
+        r.amp = 0.3; audio.play('creak', { pos: r.pos, vol: 0.6, dur: 1 });
+        return true;
+      }
+      case 'mirror':
+        if (u.mirrorText.material.opacity > 0) return false;
+        u.mirrorText.material.opacity = 0.75;
+        if (P.f === 2) audio.play('whisper', { pos: this.mirror.pos, vol: 0.6 });
+        return true;
+    }
+    return false;
+  }
+
+  // Someone wound the music box
+  playMusicBox() {
+    const b = this.unc.box;
+    b.playing = 17;
+    b.dancer.visible = true;
+    const p = b.grp.position;
+    audio.play('musicbox', { pos: { x: p.x, y: p.y + 0.1, z: p.z }, vol: 1.3 });
+    audio.play('musicbox', { vol: 0.3, reverb: true, wet: 1 }); // she hears it all through the house
+  }
+
+  _unseen(pos, r = 0.5) { return !this.frustum.intersectsSphere(new THREE.Sphere(pos, r)); }
+
+  _updateUncanny(dt) {
+    const u = this.unc, P = this.player, t = this.time;
+    if (!u || !this.running) return;
+    this.runTime += dt;
+    const room = roomAt(P.f, P.x, P.z);
+    const dist = (p) => Math.hypot(P.x - p.x, P.z - p.z);
+    // music box lid & dancer
+    const b = u.box;
+    b.open = lerp(b.open, b.playing > 0 || this.state?.mb ? 1 : 0, Math.min(1, dt * 3));
+    b.lid.rotation.x = -1.85 * b.open;
+    if (b.playing > 0) { b.playing -= dt; b.dancer.rotation.y += dt * 2.4; b.key.rotation.x -= dt * 2; }
+    // rocking chairs rock only while nobody is watching them
+    for (const r of this.rockers || []) {
+      const near = r.f === P.f && r.pos.distanceTo(new THREE.Vector3(P.x, P.y + 0.6, P.z)) < 10;
+      const seen = !this._unseen(r.pos, 0.7);
+      r.amp = lerp(r.amp, !near ? 0.03 : seen ? 0.0 : 0.2, Math.min(1, dt * (seen ? 0.7 : 0.5)));
+      r.rk.rotation.x = Math.sin(t * 1.5 + r.ph) * r.amp;
+      if (near && !seen && Math.random() < dt * 0.25) audio.play('creak', { pos: r.pos, vol: 0.35, dur: 0.5 });
+    }
+    // a dining chair that turns to face you when you look away
+    for (const c of this.creepyChairs || []) {
+      if (c.it.f !== P.f || room !== 'Dining Room') continue;
+      const cp = new THREE.Vector3(c.it.x, FLOORS[c.it.f].y + 0.5, c.it.z);
+      if (!this._unseen(cp, 0.6)) continue;
+      const want = Math.atan2(P.x - c.it.x, P.z - c.it.z);
+      let d = want - c.grp.rotation.y; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2;
+      c.grp.rotation.y += clamp(d, -dt * 2, dt * 2);
+    }
+    // wet footprints from the front door, one at a time, after the first minute
+    if (this.runTime > 50 && u.printIdx < u.prints.length) {
+      u.printT -= dt;
+      const m = u.prints[u.printIdx];
+      if (u.printT <= 0 && this._unseen(m.position, 0.3)) { m.userData.fade = 1; u.printIdx++; u.printT = rand(1.5, 4); }
+    }
+    for (const m of u.prints) if (m.userData.fade && m.material.opacity < 0.85) m.material.opacity = Math.min(0.85, m.material.opacity + dt * 0.8);
+    // self-writing walls
+    for (const w of u.writings) {
+      w.cd -= dt;
+      const mat = w.m.material, unseen = this._unseen(w.m.position, 1.2), close = w.f === P.f && dist(w.m.position) < 9;
+      if (w.state === 'hidden' && w.cd <= 0 && this.runTime > 60 && close && unseen) { w.state = 'shown'; w.t = 0; }
+      if (w.state === 'shown') {
+        if (unseen) mat.opacity = Math.min(0.9, mat.opacity + dt * 2);
+        w.t += dt * (unseen ? 0.4 : 1);
+        if (w.t > 12 && unseen) { w.state = 'fading'; }
+      }
+      if (w.state === 'fading') { mat.opacity = Math.max(0, mat.opacity - dt * 2); if (mat.opacity <= 0) { w.state = 'hidden'; w.cd = rand(70, 140); } }
+    }
+    // the nursery ball rolls towards you, once
+    if (!u.ballDone && room === 'Nursery' && this.runTime > 25 && !(u.ballRoll && u.ballRoll.s < u.ballRoll.len)) {
+      u.ballDone = true;
+      const start = new THREE.Vector3(-12.6, FLOORS[2].y + 0.12, 8.6);
+      const dir = new THREE.Vector3(P.x - start.x, 0, P.z - start.z); const len = Math.max(0, dir.length() - 1.1); dir.normalize();
+      u.ballRoll = { start, dir, len, s: 0 };
+      u.ball.position.copy(start); u.ball.visible = true;
+      audio.play('roll', { pos: start, vol: 0.9, dur: 2.6 });
+      setTimeout(() => audio.play('singing', { pos: { x: start.x, y: start.y + 1, z: start.z }, vol: 0.4 }), 1800);
+    }
+    if (u.ballRoll && u.ballRoll.s < u.ballRoll.len) {
+      const r = u.ballRoll, v = Math.max(0.15, 1.8 * (1 - r.s / Math.max(r.len, 0.1)));
+      const step = Math.min(v * dt, r.len - r.s); r.s += step;
+      u.ball.position.addScaledVector(r.dir, step);
+      u.ball.rotateOnWorldAxis(new THREE.Vector3(r.dir.z, 0, -r.dir.x), step / 0.11);
+    }
+    // the piano plays a few wrong notes by itself
+    u.pianoCd -= dt;
+    if (u.pianoCd <= 0 && P.f === 1 && dist(u.pianoPos) < 6 && Math.random() < dt * 0.3) this._uncanny('piano');
+    // the kitchen wireless crackles into life
+    u.radioCd -= dt;
+    if (u.radioCd <= 0 && P.f === 1 && dist(u.radioPos) < 5 && Math.random() < dt * 0.4) this._uncanny('radio');
+    if (u.radioOn > 0) u.radioOn -= dt;
+    u.dialMat.color.setHex(u.radioOn > 0 ? (Math.random() < 0.85 ? 0xffb050 : 0x803010) : 0x302010);
+    // bath taps turn themselves on
+    u.tapsCd -= dt;
+    if (u.tapsCd <= 0 && room === 'Bathroom') this._uncanny('taps');
+    // and every so often, one of them happens at random wherever you are
+    u.dirT -= dt;
+    if (u.dirT <= 0 && this.runTime > 30 && !this.entity) {
+      u.dirT = rand(35, 70);
+      const all = ['piano', 'radio', 'taps', 'lamp', 'writing', 'ball', 'prints', 'musicbox', 'rocker', 'mirror'];
+      for (let i = 0; i < 4 && !this._uncanny(all[Math.floor(Math.random() * all.length)]); i++);
+    }
+    // hanging lamps sway on their own
+    for (const r of this.roomLights) {
+      if (!r.pivot) continue;
+      r.swingT -= dt;
+      if (r.swingT <= 0) {
+        r.swingT = rand(35, 80);
+        if (floorOfY(r.pivot.position.y - 0.5) === P.f && dist(r.pivot.position) < 12) { r.swing = 0.32; audio.play('creak', { pos: r.pivot.position, vol: 0.3, dur: 0.8 }); }
+      }
+      r.swing *= Math.exp(-dt * 0.25);
+      const a = r.swing * Math.sin(t * 2.1 + r.ph);
+      r.pivot.rotation.set(a * 0.35, 0, a);
+      r.l.position.set(r.pivot.position.x + Math.sin(a) * r.len, r.pivot.position.y - Math.cos(a) * r.len, r.pivot.position.z - Math.sin(a * 0.35) * r.len);
+    }
   }
 
   // Nearest entrance I could board up
@@ -1542,6 +1811,7 @@ export class Game3D {
 
   start() {
     this.running = true;
+    this.resetUncanny();
     this.root.style.display = 'block';
     this.clock.getDelta();
     const loop = () => {

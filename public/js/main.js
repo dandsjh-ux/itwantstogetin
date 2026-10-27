@@ -377,6 +377,7 @@ function hudFrame() {
     } else if (it.type === 'pickup') txt = `${key} Pick up ${POWERUP_TYPES[it.p.t].name}`;
     else if (it.type === 'note') txt = `${key} Read: ${it.n.title}`;
     else if (it.type === 'phone') txt = `${key} Answer the phone…`;
+    else if (it.type === 'musicbox') { txt = `${key} Wind the music box`; cls = 'attack'; }
     else if (it.type === 'ladder') txt = it.dir === 'up' ? `${key} Climb the ladder to the Attic` : `${key} Climb down the ladder`;
   }
   if (!txt && S.me?.inv.plank && !S.overlay) {
@@ -462,6 +463,12 @@ socket.on('banished', (d) => {
     audio.play('banish', { pos: { x: A.x, y: A.y + 1.5, z: A.z }, vol: d.by === S.myId ? 1.2 : 0.8 });
   }
 });
+socket.on('musicBox', (d) => {
+  S.game?.playMusicBox();
+  audio.duck(0.15, 6);
+  notify(d.by === S.myId ? 'The music box begins to play… and something outside stops to listen.' : `${d.name} wound the music box. She heard it.`, 'attack');
+  if (S.game) S.game.flicker = 2;
+});
 socket.on('entityPush', (d) => S.game?.pushAttack(d.e));
 socket.on('breach', (d) => {
   const e = eById[d.e];
@@ -534,6 +541,7 @@ controls.on('interact', () => {
   else if (it.type === 'pickup') socket.emit('pickup', { id: it.p.id });
   else if (it.type === 'note') openNote(it.n.title, it.n.text, it.n);
   else if (it.type === 'ladder') S.game.startClimb(it.dir);
+  else if (it.type === 'musicbox') socket.emit('playMusicBox');
   else if (it.type === 'phone') {
     S.game.answerPhone();
     audio.play('whisper', { vol: 1, file: true });

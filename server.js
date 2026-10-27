@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import { Server } from 'socket.io';
 import {
   ENTRANCES, FLOORS, SALT_CIRCLES, POWERUP_SPOTS, SPAWN_POINTS, PLAYER_COLORS,
-  entranceInteractPoint, INTERACT_RANGE,
+  entranceInteractPoint, INTERACT_RANGE, MUSIC_BOX,
 } from './public/js/layout.js';
 import { makeQuestion, getWordInfo, LEVEL_NAMES } from './server/vocab.js';
 
@@ -120,7 +120,7 @@ function startGame(room) {
     timeLeft: s.duration, banished: 0, wards: s.wards, attacks: new Map(), nextAttack: 6,
     cooldowns: {}, breach: null, powerups: [], nextPowerup: 4, circles: [],
     planks: new Set(), recentWords: [], startedAt: Date.now(), elapsed: 0, result: null,
-    totalBreaches: 0,
+    totalBreaches: 0, musicBox: false,
   };
   // Seed a few powerups
   if (s.powerups) for (let i = 0; i < 3; i++) spawnPowerup(room);
@@ -366,7 +366,7 @@ function tick(room) {
     br: g.breach ? { x: +g.breach.x.toFixed(2), y: +g.breach.y.toFixed(2), z: +g.breach.z.toFixed(2), f: g.breach.f, l: Math.ceil(g.breach.left), tgt: g.breach.target, on: g.breach.spawnDelay <= 0 } : null,
     pw: g.powerups.map((p) => ({ id: p.id, t: p.type, x: p.x, y: p.y, z: p.z, f: p.f })),
     c: g.circles.map((c) => ({ id: c.id, x: c.x, z: c.z, f: c.f, r: c.r, l: Math.ceil(c.until - g.elapsed) })),
-    pk: [...g.planks],
+    pk: [...g.planks], mb: g.musicBox,
     p: [...room.players.values()].map((p) => ({
       id: p.id, x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), yaw: +p.yaw.toFixed(2), f: p.f, tr: p.torch,
       cg: p.caughtUntil > now, inv: p.inv, sp: Math.max(0, Math.ceil((p.speedUntil - now) / 1000)),
@@ -598,6 +598,22 @@ io.on('connection', (socket) => {
     const a = [...g.attacks.values()].find((x) => x.e === e.id);
     if (a) { a.left += 25; a.total += 25; a.planked = true; }
     io.to(room.code).emit('planked', { e: e.id, by: p.id, name: p.name });
+  });
+
+  // Winding the music box: she hears it and comes straight in through the dining room window
+  socket.on('playMusicBox', () => {
+    const p = me();
+    if (!p || room.phase !== 'playing') return;
+    const g = room.game;
+    if (g.musicBox || g.breach || g.finalBreach || p.caughtUntil > Date.now()) return;
+    if (p.f !== MUSIC_BOX.f || Math.hypot(p.x - MUSIC_BOX.x, p.z - MUSIC_BOX.z) > 2.6) return;
+    g.musicBox = true;
+    io.to(room.code).emit('musicBox', { by: p.id, name: p.name });
+    setTimeout(() => {
+      if (room.phase !== 'playing' || room.game !== g || g.breach || g.finalBreach) return;
+      const eid = 'dining_side_window';
+      triggerBreach(room, [...g.attacks.values()].find((a) => a.e === eid) || { id: 'musicbox', e: eid });
+    }, 2500);
   });
 
   socket.on('torch', (on) => { const p = me(); if (p) p.torch = !!on; });

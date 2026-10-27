@@ -478,3 +478,18 @@ export function grainDataURL() {
   g.putImageData(id, 0, 0);
   return c.toDataURL('image/png');
 }
+
+// A wet, bare footprint (toes towards the top)
+export function footprint() {
+  if (cache.has('foot')) return cache.get('foot');
+  const [c, g] = canvas(64, 128);
+  g.fillStyle = 'rgba(14,20,24,0.85)';
+  g.beginPath(); g.ellipse(32, 78, 17, 34, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(30, 112, 12, 13, 0, 0, Math.PI * 2); g.fill();
+  for (const [x, y, r] of [[22, 30, 6.5], [33, 24, 5.5], [42, 26, 4.8], [49, 31, 4.2], [54, 38, 3.6]]) { g.beginPath(); g.arc(x - 4, y - 4, r, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = 'rgba(160,190,210,0.25)';
+  g.beginPath(); g.ellipse(26, 70, 5, 16, -0.2, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  cache.set('foot', t);
+  return t;
+}
