@@ -605,6 +605,35 @@ export class AudioSys {
     s.connect(lp); lp.connect(g); g.connect(out);
   }
 
+  // Title word: a deep, hollow toll that trails away in darkening echoes
+  s_titleword(o) {
+    const ctx = this.ctx, t = ctx.currentTime, p = o.pitch || 1;
+    const out = this._out({ vol: o.vol ?? 1, wet: 1.2 });
+    // echo line: each repeat quieter and duller than the last
+    const delay = ctx.createDelay(2); delay.delayTime.value = 0.42;
+    const fb = ctx.createGain(); fb.gain.value = 0.55;
+    const damp = ctx.createBiquadFilter(); damp.type = 'lowpass'; damp.frequency.value = 1400;
+    const send = ctx.createGain(); send.gain.value = 0.7;
+    delay.connect(damp); damp.connect(fb); fb.connect(delay); damp.connect(out); send.connect(delay);
+    const hit = ctx.createGain(); hit.connect(out); hit.connect(send);
+    // low body
+    const b = ctx.createOscillator(); b.frequency.setValueAtTime(70 * p, t); b.frequency.exponentialRampToValueAtTime(38 * p, t + 1.2);
+    const bg = ctx.createGain(); bg.gain.setValueAtTime(0, t); bg.gain.linearRampToValueAtTime(0.9, t + 0.01); bg.gain.exponentialRampToValueAtTime(0.001, t + 1.8);
+    b.connect(bg); bg.connect(hit); b.start(t); b.stop(t + 1.9);
+    // hollow, slightly out-of-tune bell partials
+    for (const [mul, a, d] of [[1, 0.22, 3.5], [2.41, 0.1, 2.4], [3.9, 0.05, 1.6], [5.3, 0.025, 1.1]]) {
+      const os = ctx.createOscillator(); os.type = 'sine'; os.frequency.value = 146.8 * p * mul;
+      const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(a, t + 0.015); g.gain.exponentialRampToValueAtTime(0.001, t + d);
+      os.connect(g); g.connect(hit); os.start(t); os.stop(t + d + 0.05);
+    }
+    // a breath of air on the attack
+    const n = this._noiseSrc(t, 0.6);
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 0.8;
+    const ng = ctx.createGain(); ng.gain.setValueAtTime(0.25, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    n.connect(bp); bp.connect(ng); ng.connect(hit);
+    setTimeout(() => { try { delay.disconnect(); fb.disconnect(); } catch {} }, 9000);
+  }
+
   s_thunder(o) {
     const ctx = this.ctx, out = this._out({ ...o, wet: 1 }), t = ctx.currentTime, d = o.dur || 4;
     const s = this._noiseSrc(t, Math.min(1.9, d));

@@ -227,15 +227,17 @@ function runCutscene() {
     t += i === 3 ? 3400 : 4200;
   });
   const words = ['IT', 'WANTS', 'TO', 'GET', 'IN'];
+  // each word tolls once and echoes away — no crashes or screams here
+  const gap = 1100, pitches = [1, 0.94, 1.06, 0.89, 0.84];
   words.forEach((w, i) => {
-    at(t + i * 650, () => {
+    at(t + i * gap, () => {
       const d = document.createElement('div'); d.textContent = w; ttl.appendChild(d);
       requestAnimationFrame(() => d.classList.add('show'));
-      audio.play('knock', { count: 1, vol: 1, file: false });
-      if (i === words.length - 1) { d.classList.add('shake'); audio.play('stinger', { vol: 1 }); audio.play('glass', { vol: 0.7 }); }
+      audio.play('titleword', { pitch: pitches[i], vol: i === words.length - 1 ? 1.1 : 0.9 });
+      if (i === words.length - 1) d.classList.add('shake');
     });
   });
-  at(t + words.length * 650 + 2600, showRules);
+  at(t + words.length * gap + 3200, showRules);
 }
 $('#btn-skip').onclick = () => { cutTimers.forEach(clearTimeout); showRules(); };
 
