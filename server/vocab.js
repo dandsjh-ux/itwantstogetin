@@ -263,12 +263,121 @@ const MIX = {
   y910: { sentence: 36, def2word: 28, word2def: 14, synonym: 14, antonym: 8 },
 };
 
+// ---------------------------------------------------------------------------
+// Figurative language (Year 9/10 only): lines drawn from the house and its story.
+// Format: technique | the line | what it means / its effect | a wrong, too-literal reading | other techniques it also uses
+const TECHS = {
+  simile: "compares two things using 'like' or 'as'",
+  metaphor: 'says one thing IS another, to paint a picture',
+  personification: 'gives human actions or feelings to something that is not human',
+  alliteration: 'repeats the same sound at the start of nearby words',
+  onomatopoeia: 'uses a word that sounds like the noise it describes',
+  hyperbole: 'a big exaggeration, used for effect',
+  oxymoron: 'puts two opposite words together',
+  idiom: 'a saying whose meaning is not the same as its words',
+};
+const FIG_RAW = `simile|The hallway was as silent as a grave.|The hallway was completely, deathly quiet.|Someone had dug a hole in the hallway.|
+simile|Her face was as pale as moonlight.|Her face was very white and almost glowing, like a ghost's.|The moon was shining on her face from behind.|
+simile|The knocking came like a heartbeat, slow and steady.|The knocks had a slow, steady rhythm that made the fear build.|Someone's heart was knocking on the door.|
+simile|Her long black hair hung like a curtain over her face.|Her hair completely hid her face.|She had hung a real curtain over her head.|
+simile|The cold seeped into my bones like icy water.|The cold spread deep inside my body and would not go away.|Water was leaking into my bones from the ceiling.|
+simile|I froze like a rabbit caught in torchlight.|I was so scared that I could not move.|A real rabbit was standing in the torchlight beside me.|
+metaphor|The house was a sleeping beast.|The house seemed alive and dangerous, quiet only for now.|A real animal was asleep inside the house.|
+metaphor|The night was a black blanket over the garden.|The darkness covered the whole garden completely.|Someone had thrown a blanket over the garden.|
+metaphor|Her eyes were two empty wells.|Her eyes were dark and deep, with no life in them.|Her eyes were full of water, like wells.|
+metaphor|Fear was a cold hand gripping my throat.|The fear felt like it was choking me.|A real hand was holding my neck.|
+metaphor|The cellar was a tomb of forgotten things.|The cellar was a dark, silent place where old things lay untouched.|Dead bodies were buried in the cellar.|
+metaphor|The open hatch was a black mouth above us.|The hatch looked like a dark, hungry mouth, ready to swallow us.|The hatch had a mouth painted on it.|
+personification|The stairs groaned under my feet.|The stairs creaked loudly, as if they were in pain.|A person under the stairs was groaning.|onomatopoeia
+personification|The wind whispered secrets through the keyhole.|The wind made soft, mysterious sounds, as if it were speaking.|The wind was telling secrets to a person at the keyhole.|onomatopoeia
+personification|The shadows crept across the walls, hunting for us.|The shadows seemed alive and were closing in on us.|Hunters were hiding in the shadows on the walls.|
+personification|The old house held its breath.|Everything went still and silent, as if waiting for something.|The house had no air left inside it.|
+personification|The portraits watched us with hungry eyes.|The portraits seemed to stare at us in a frightening way.|The people in the portraits were really starving.|
+alliteration|Silent shadows slithered slowly down the stairs.|The repeated 's' sound makes a soft hissing noise, like a snake.|Snakes were slithering down the stairs.|personification
+alliteration|Cold, creeping claws clawed at the cracked glass.|The hard 'c' sounds make the scratching feel sharp and harsh.|A cat clawed at the cold, cracked glass.|
+alliteration|Dark drips dropped in the dreadful, dripping dark.|The repeated 'd' sounds copy the slow, heavy dripping.|It was raining inside the dark room.|
+alliteration|Whispers wound through the winding walls.|The soft 'w' sounds feel like whispering and wind.|The walls had been wound up like a clock.|personification
+alliteration|Frozen fingers fumbled for the faint, flickering flame.|The 'f' sounds make the nervous, shaky search feel rushed.|The fingers were burned by the flame.|
+onomatopoeia|Creak... creak... creak... went the stairs, one slow step at a time.|The sound words let us hear the slow, spooky footsteps.|The stairs were breaking into pieces.|
+onomatopoeia|The door slammed shut with a deafening BANG.|The word BANG copies the noise, so we hear the shock of it.|Someone called Bang had closed the door.|
+onomatopoeia|Drip... drip... drip... went the tap in the dark cellar.|The repeated sound makes the waiting feel longer and more tense.|The cellar was flooding with water.|
+onomatopoeia|The window rattled and the wind hissed outside.|The sound words help us hear the storm shaking the glass.|A snake and a rattle were outside the window.|personification
+hyperbole|I waited a million years for the knocking to stop.|It felt like a very long time. It is an exaggeration.|I really did wait for a million years.|
+hyperbole|The cellar was colder than the North Pole.|The cellar was extremely cold.|The cellar was at the North Pole.|
+hyperbole|My heart nearly burst out of my chest.|My heart was pounding hard with fear.|My heart really came out of my body.|
+hyperbole|A thousand eyes watched me from the portraits.|I felt watched by lots of staring portraits.|There were exactly a thousand portraits in the house.|
+oxymoron|A deafening silence filled the hall.|It was so quiet that the silence felt loud and heavy.|The hall was full of loud noise.|hyperbole
+oxymoron|The living dead woman stared from the window.|She was neither truly alive nor truly dead. She was a ghost.|She was a sick woman waving from the window.|
+oxymoron|A silent scream rose in my throat.|I was so frightened that no sound would come out.|I screamed very quietly on purpose.|
+oxymoron|The portrait had a terrible beauty.|The portrait was lovely and horrifying at the same time.|The portrait was ugly and a bit dull.|
+idiom|A chill ran down my spine.|I felt a sudden shiver of fear.|Cold water ran down my back.|
+idiom|My blood ran cold.|I suddenly felt terrified.|I had lost blood and felt ill.|
+idiom|She nearly jumped out of her skin.|She got a huge fright.|She took off her skin and jumped.|
+idiom|It was the dead of night.|It was the darkest, quietest part of the night.|Someone had died that night.|
+idiom|My heart skipped a beat.|I was suddenly shocked or scared.|I had a problem with my heart.|
+idiom|The hairs on the back of my neck stood up.|I felt that something creepy was near.|I had combed my hair the wrong way.|`;
+const FIGS = FIG_RAW.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+  const [tech, line, mean, lit, also] = l.split('|').map((s) => s.trim());
+  return { tech, line, mean, lit, also: also ? also.split(',') : [] };
+});
+export const FIG_SHARE = 0.3; // chance that a Year 9/10 question is figurative
+
+const figDef = (f) => `${f.tech.toUpperCase()}: ${f.mean}`;
+const withTech = (f, t) => f.tech === t || f.also.includes(t);
+
+function figurativeQuestion(recent) {
+  let pool = FIGS.filter((f) => !recent.includes(f.line));
+  if (pool.length < 6) pool = FIGS;
+  const f = pick(pool);
+  const techNames = Object.keys(TECHS);
+  const r = Math.random();
+  let prompt, focus = '', sub = '', correct, others, word = f.line, def = figDef(f), type;
+
+  if (r < 0.38) {
+    // What does the line mean?
+    type = 'fig_meaning';
+    const named = Math.random() < 0.6;
+    const effect = ['alliteration', 'onomatopoeia', 'oxymoron'].includes(f.tech);
+    prompt = !named ? 'What does this line suggest?' : effect ? `What effect does this ${f.tech} create?` : `What does this ${f.tech} mean?`;
+    sub = `“${f.line}”`;
+    correct = f.mean;
+    others = [f.lit, ...sample(FIGS.filter((o) => o.tech !== f.tech).map((o) => o.mean), 2)];
+  } else if (r < 0.66) {
+    // Which technique is it?
+    type = 'fig_name';
+    prompt = 'Which technique is used in this line?'; sub = `“${f.line}”`;
+    correct = f.tech;
+    others = sample(techNames.filter((t) => t !== f.tech && !f.also.includes(t)), 3);
+  } else if (r < 0.86) {
+    // Which line is an example of X?
+    type = 'fig_spot';
+    prompt = `Which line is an example of ${/^[aeiou]/.test(f.tech) ? 'an' : 'a'} ${f.tech.toUpperCase()}?`;
+    correct = f.line;
+    // three lines, each from a different technique, none of which also uses the one being asked about
+    others = shuffle(FIGS.filter((o) => !withTech(o, f.tech)))
+      .filter((o, i, a) => a.findIndex((x) => x.tech === o.tech) === i).slice(0, 3).map((o) => o.line);
+  } else {
+    // Which term means ...?
+    type = 'fig_term';
+    prompt = 'Which term means:'; sub = `“${TECHS[f.tech]}”`;
+    correct = f.tech; word = f.tech; def = `${f.tech.toUpperCase()}: ${TECHS[f.tech]}`;
+    others = sample(techNames.filter((t) => t !== f.tech), 3);
+  }
+  const options = shuffle([...new Set([correct, ...others])].slice(0, 4));
+  return { word, type, prompt, focus, sub, options, answer: options.indexOf(correct), correctText: correct, flavour: pick(FLAVOUR), def };
+}
+
 export function getWordInfo(level, word) {
-  return (WORDS[level] || []).find((w) => w.word === word);
+  const w = (WORDS[level] || []).find((x) => x.word === word);
+  if (w || level !== 'y910') return w;
+  const f = FIGS.find((x) => x.line === word);
+  if (f) return { word: f.line, def: figDef(f) };
+  return TECHS[word] ? { word, def: `${word.toUpperCase()}: ${TECHS[word]}` } : undefined;
 }
 
 // recent: array of recently used words (avoid repeats)
 export function makeQuestion(level, recent = []) {
+  if (level === 'y910' && Math.random() < FIG_SHARE) return figurativeQuestion(recent);
   const list = WORDS[level] || WORDS.y34;
   let candidates = list.filter((w) => !recent.includes(w.word));
   if (candidates.length < 8) candidates = list;

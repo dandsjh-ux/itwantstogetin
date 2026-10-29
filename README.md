@@ -122,6 +122,15 @@ Year 3/4 level skips "similar meaning". Wrong options always come from a differe
 only one answer fits, and they match the right answer's part of speech so grammar can't give it away.
 Recently used words are avoided, and the results screen lists the words to review.
 
+**Figurative language (Year 9/10 only).** About 30% of Year 9/10 questions are about figurative
+language, using 40 lines written for the house and its story ("The stairs groaned under my feet",
+"Fear was a cold hand gripping my throat", "A silent scream rose in my throat"). They cover simile,
+metaphor, personification, alliteration, onomatopoeia, hyperbole, oxymoron and idioms, in four styles:
+*what does this line mean?*, *which technique is used?*, *which line is an example of a simile?* and
+*which term means "…"?*. The meaning questions include a too-literal wrong answer ("A real hand was
+holding my neck"), and the results screen explains each line you missed. The lines live in
+`server/vocab.js` (`FIG_RAW`); the share is set by `FIG_SHARE`.
+
 Add words by appending lines in the format:
 
 ```
