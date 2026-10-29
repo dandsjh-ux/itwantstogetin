@@ -107,9 +107,18 @@ export function surface(kind) {
       t = tex(c, [6, 6]); break;
     }
     case 'ground': {
+      // moonlit snow: soft drifts, a faint blue cast, a scatter of glints
       [c, g] = canvas(S, S);
-      g.fillStyle = '#0d120c'; g.fillRect(0, 0, S, S);
-      for (let i = 0; i < 1600; i++) { g.fillStyle = `rgba(${20 + rnd() * 30},${30 + rnd() * 40},${15 + rnd() * 20},0.6)`; g.fillRect(rnd() * S, rnd() * S, 1, 3 + rnd() * 4); }
+      g.fillStyle = '#9aa7ba'; g.fillRect(0, 0, S, S);
+      for (let i = 0; i < 46; i++) {
+        const x = rnd() * S, y = rnd() * S, r = 22 + rnd() * 50, lit = rnd() < 0.5;
+        for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
+          const gr = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+          gr.addColorStop(0, lit ? 'rgba(220,230,245,0.28)' : 'rgba(60,75,100,0.25)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+          g.fillStyle = gr; g.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+        }
+      }
+      for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(255,255,255,${0.25 + rnd() * 0.5})`; g.fillRect(rnd() * S, rnd() * S, 1, 1); }
       t = tex(c, [30, 30]); break;
     }
     default: return surface('wall');
@@ -280,31 +289,105 @@ export function silhouette(kind = 'woman') {
   return t;
 }
 
+// ---------------------------------------------------------------------------
+// Smoke helpers: value noise, used to smear features and build vapour
+function hash2(ix, iy) {
+  let h = Math.imul(ix, 374761393) + Math.imul(iy, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+function vnoise(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = hash2(ix, iy), b = hash2(ix + 1, iy), c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function fbm(x, y, oct = 4) {
+  let s = 0, a = 0.5, f = 1, n = 0;
+  for (let i = 0; i < oct; i++) { s += a * vnoise(x * f + i * 17.3, y * f + i * 5.1); n += a; f *= 2.03; a *= 0.5; }
+  return s / n;
+}
+const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+
+// The entity's face: a grey, soft-edged face made of smoke. Hollow black eyes, a gaping mouth, wisps
+// streaming off it like vapour. Painted per pixel so every feature smears into the mist.
+// Transparent outside, so it can float in front of a dark head.
+function smokeFace(S, o = {}) {
+  const [c, g] = canvas(S, S);
+  const id = g.createImageData(S, S), px = id.data;
+  const mouthRx = o.mouthRx ?? 0.1, mouthRy = o.mouthRy ?? 0.23;
+  const seg = (x, y, ax, ay, bx, by) => {
+    const vx = bx - ax, vy = by - ay, t = clamp01(((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy));
+    return [Math.hypot(x - ax - vx * t, y - ay - vy * t), t];
+  };
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const u = (x / S - 0.5) * 2, v = (y / S - 0.5) * 2;
+    // drift: warp the coordinates so everything looks like it's made of vapour
+    const wu = u + (fbm(u * 1.7 + 3.1, v * 1.7 + 1.7, 3) - 0.5) * 0.3;
+    const wv = v + (fbm(u * 1.7 + 8.3, v * 1.7 + 5.2, 3) - 0.5) * 0.3;
+    // face, mist and wisps
+    const faceA = 1 - sstep(0.6, 1.1, Math.hypot(wu / 0.42, (wv - 0.04) / 0.6));
+    const n = fbm(u * 2.4 + 11, v * 2.4 + 4.5, 5);
+    const hazeA = (1 - sstep(0.12, 0.98, Math.hypot(u * 0.95, v))) * (0.1 + 0.9 * sstep(0.32, 0.72, n)) * 0.72;
+    // wisps curl and thin out, and are uneven from side to side
+    const cu = u + (fbm(u * 2.2 + 41, v * 2.2 + 7, 3) - 0.5) * 0.7, cv = v + (fbm(u * 2.2 + 9, v * 2.2 + 63, 3) - 0.5) * 0.7;
+    let wispA = 0;
+    for (const s of [-1, 1]) {
+      const k = s > 0 ? 1 : 0.75;
+      let [dd, t] = seg(cu, cv, s * 0.16, -0.4, s * 0.3, -0.95);                    // pointed wisps rising off the head
+      wispA = Math.max(wispA, (1 - sstep(0, 1, dd / (0.11 * (1 - t * 0.9) + 0.008))) * 0.5 * k * (1 - t * 0.4));
+      [dd, t] = seg(cu, cv, s * 0.32, 0.0, s * 0.96, 0.46 + s * 0.1);               // streaks trailing out sideways
+      wispA = Math.max(wispA, (1 - sstep(0, 1, dd / (0.15 * (1 - t * 0.85) + 0.01))) * 0.26 * k * (0.2 + n));
+      [dd, t] = seg(cu, cv, s * 0.16, 0.54, s * 0.4 + s * 0.1, 0.99);               // and down below the chin
+      wispA = Math.max(wispA, (1 - sstep(0, 1, dd / (0.1 * (1 - t * 0.85) + 0.01))) * 0.22 * k * (0.2 + n));
+    }
+    wispA *= 0.2 + 1.5 * sstep(0.3, 0.7, fbm(u * 3 + 30, v * 3 + 2, 3));
+    let alpha = 1 - (1 - faceA) * (1 - hazeA) * (1 - clamp01(wispA));
+
+    // brightness: forehead and cheeks catch the light, the mist is dimmer and mottled
+    const lit = clamp01(1 - Math.hypot(wu / 0.5, (wv + 0.12) / 0.7));
+    const mottle = 0.78 + 0.44 * fbm(u * 4.5 + 20, v * 4.5 + 9, 3);
+    const faceCol = 128 + 112 * lit, mistCol = 72 + 84 * n;
+    const wm = Math.max(hazeA, clamp01(wispA));
+    let col = (faceCol * faceA + mistCol * wm) / (faceA + wm + 1e-4) * mottle;
+
+    // hollow eyes: black sockets, a faint dark halo, set a little askew (features smear less than the mist)
+    const fu = u + (wu - u) * 0.5, fv = v + (wv - v) * 0.5;
+    let hole = 0, shade = 0;
+    for (const sx of [-1, 1]) {
+      const dx = fu - sx * 0.18, dy = fv + 0.15, a = sx * 0.28;
+      const e = Math.hypot((dx * Math.cos(a) - dy * Math.sin(a)) / 0.12, (dx * Math.sin(a) + dy * Math.cos(a)) / 0.088);
+      hole = Math.max(hole, 1 - sstep(0.35, 1.2, e));
+      shade += (1 - sstep(0.7, 2.5, e)) * 0.5;
+      shade += (1 - sstep(0.15, 1, Math.hypot((fu - sx * 0.22) / 0.15, (fv - 0.22) / 0.2))) * 0.28;   // sunken cheeks
+    }
+    // nose: two dark nostrils and a shadow down the bridge
+    hole = Math.max(hole, (1 - sstep(0.2, 1, Math.hypot(fu / 0.055, (fv - 0.22) / 0.06))) * 0.55);
+    shade += (1 - sstep(0, 1, Math.abs(fu - 0.03) / 0.035)) * sstep(-0.1, 0.05, fv) * (1 - sstep(0.12, 0.2, fv)) * 0.08;
+    // the mouth: stretched wide open, with a pale rim
+    const m = Math.hypot(fu / mouthRx, (fv - 0.45) / mouthRy);
+    hole = Math.max(hole, 1 - sstep(0.55, 1.05, m));
+    shade += (1 - sstep(0.9, 2.2, m)) * 0.4;
+    const rim = sstep(0.95, 1.1, m) * (1 - sstep(1.1, 1.4, m)) * (fv > 0.45 ? 1 : 0.4);
+    // brow and jaw fall into shadow
+    shade += (1 - sstep(0, 0.12, Math.abs(fv + 0.3))) * 0.2 + sstep(0.3, 0.8, fv) * 0.5;
+    col = col * (1 - clamp01(shade * faceA)) + rim * 45 * faceA;
+    col += (8 - col) * clamp01(hole);
+    alpha = Math.max(alpha, clamp01(hole)) * (1 - sstep(0.8, 1, Math.hypot(u, v)));
+
+    const i = (y * S + x) * 4;
+    px[i] = Math.min(255, col * 0.97); px[i + 1] = Math.min(255, col); px[i + 2] = Math.min(255, col * 1.06 + 4);
+    px[i + 3] = alpha * 255;
+  }
+  g.putImageData(id, 0, 0);
+  return c;
+}
+
 export function womanFace() {
   if (cache.has('wface')) return cache.get('wface');
-  const W = 256, H = 256;
-  const [c, g] = canvas(W, H);
-  // oval face, transparent outside
-  g.save();
-  g.beginPath(); g.ellipse(W / 2, H / 2 + 4, W * 0.42, H * 0.49, 0, 0, Math.PI * 2); g.clip();
-  g.fillStyle = '#cfccc4'; g.fillRect(0, 0, W, H);
-  const sh = g.createRadialGradient(W / 2, H / 2 - 10, 20, W / 2, H / 2, 135);
-  sh.addColorStop(0, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(30,40,50,0.85)');
-  g.fillStyle = sh; g.fillRect(0, 0, W, H);
-  // sunken black eyes
-  for (const x of [W / 2 - 38, W / 2 + 38]) {
-    const eg = g.createRadialGradient(x, 110, 4, x, 110, 30);
-    eg.addColorStop(0, '#000'); eg.addColorStop(0.55, '#050202'); eg.addColorStop(1, 'rgba(30,20,20,0)');
-    g.fillStyle = eg; g.beginPath(); g.ellipse(x, 110, 30, 24, 0, 0, Math.PI * 2); g.fill();
-  }
-  // gaping mouth
-  const mg = g.createRadialGradient(W / 2, 190, 2, W / 2, 190, 26);
-  mg.addColorStop(0, '#000'); mg.addColorStop(1, 'rgba(20,0,0,0)');
-  g.fillStyle = mg; g.beginPath(); g.ellipse(W / 2, 190, 16, 26, 0, 0, Math.PI * 2); g.fill();
-  g.strokeStyle = 'rgba(60,70,80,0.4)'; g.lineWidth = 1;
-  for (let i = 0; i < 12; i++) { g.beginPath(); const x = rnd() * W; g.moveTo(x, rnd() * H); g.lineTo(x + (rnd() - 0.5) * 40, rnd() * H); g.stroke(); }
-  g.restore();
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const t = new THREE.CanvasTexture(smokeFace(256));
+  t.colorSpace = THREE.SRGBColorSpace;
   cache.set('wface', t);
   return t;
 }
@@ -383,45 +466,31 @@ export function paper() {
   return t;
 }
 
-// Full-screen jump scare: her face through curtains of black hair
+// The same face, screaming: for the sudden flash in the dark
+export function screamFace() {
+  if (cache.has('scream')) return cache.get('scream');
+  const t = new THREE.CanvasTexture(smokeFace(320, { mouthRx: 0.11, mouthRy: 0.28 }));
+  t.colorSpace = THREE.SRGBColorSpace;
+  cache.set('scream', t);
+  return t;
+}
+
+// Full-screen jump scare: her smoke face, screaming, rushing out of the dark
 export function scareImage() {
   const W = 800, H = 600;
   const [c, g] = canvas(W, H);
   g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
-  const cx = W / 2, cy = H * 0.52;
-  // face
-  const fg = g.createRadialGradient(cx, cy - 20, 20, cx, cy, 260);
-  fg.addColorStop(0, '#e4e1da'); fg.addColorStop(0.6, '#9da3a6'); fg.addColorStop(1, '#1a1c1e');
-  g.fillStyle = fg; g.beginPath(); g.ellipse(cx, cy, 190, 270, 0, 0, Math.PI * 2); g.fill();
-  // eye sockets and pinprick pupils
-  for (const sx of [-1, 1]) {
-    const ex = cx + sx * 72, ey = cy - 40;
-    const eg = g.createRadialGradient(ex, ey, 4, ex, ey, 70);
-    eg.addColorStop(0, '#000'); eg.addColorStop(0.6, '#050202'); eg.addColorStop(1, 'rgba(20,10,10,0)');
-    g.fillStyle = eg; g.beginPath(); g.ellipse(ex, ey, 70, 52, sx * 0.15, 0, Math.PI * 2); g.fill();
-    g.fillStyle = '#d8d0c0'; g.beginPath(); g.arc(ex + sx * 4, ey + 4, 4, 0, Math.PI * 2); g.fill();
-  }
-  // stretched screaming mouth
-  const mg = g.createLinearGradient(0, cy + 70, 0, cy + 260);
-  mg.addColorStop(0, '#000'); mg.addColorStop(1, '#200000');
-  g.fillStyle = mg; g.beginPath(); g.ellipse(cx, cy + 160, 46, 100, 0, 0, Math.PI * 2); g.fill();
-  // veins / cracks
-  g.strokeStyle = 'rgba(40,50,60,0.55)'; g.lineWidth = 1.5;
-  for (let i = 0; i < 40; i++) { g.beginPath(); let x = cx + (rnd() - 0.5) * 340, y = cy + (rnd() - 0.5) * 460; g.moveTo(x, y); for (let k = 0; k < 4; k++) { x += (rnd() - 0.5) * 40; y += rnd() * 40; g.lineTo(x, y); } g.stroke(); }
-  // hair: long strands hanging over the sides and across the face
-  g.strokeStyle = '#030202';
-  for (let i = 0; i < 520; i++) {
-    const side = rnd() < 0.5 ? -1 : 1;
-    const x0 = cx + side * (40 + rnd() * 260) * (rnd() < 0.15 ? 0.3 : 1);
-    g.lineWidth = 1 + rnd() * 4;
-    g.beginPath(); g.moveTo(x0, -10);
-    g.bezierCurveTo(x0 + side * rnd() * 40, H * 0.3, x0 - side * rnd() * 60, H * 0.7, x0 + (rnd() - 0.5) * 80, H + 10);
-    g.stroke();
-  }
-  g.fillStyle = '#030202'; g.beginPath(); g.ellipse(cx, 20, 260, 120, 0, 0, Math.PI * 2); g.fill();
-  // red tint + vignette
-  g.fillStyle = 'rgba(120,0,0,0.18)'; g.fillRect(0, 0, W, H);
-  const vg = g.createRadialGradient(cx, cy, 150, cx, cy, 520);
+  const face = smokeFace(384, { mouthRx: 0.1, mouthRy: 0.27 });
+  // a wide dim halo of the same face, then the face itself, brightened
+  g.globalAlpha = 0.3; g.globalCompositeOperation = 'lighter';
+  g.drawImage(face, W / 2 - 520, H / 2 - 480, 1040, 1040);
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  g.drawImage(face, W / 2 - 380, H / 2 - 360, 760, 760);
+  g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.18;
+  g.drawImage(face, W / 2 - 380, H / 2 - 360, 760, 760);
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  g.fillStyle = 'rgba(90,0,0,0.12)'; g.fillRect(0, 0, W, H);
+  const vg = g.createRadialGradient(W / 2, H / 2, 150, W / 2, H / 2, 520);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.95)');
   g.fillStyle = vg; g.fillRect(0, 0, W, H);
   grain(g, W, H, 0.12);
@@ -491,5 +560,120 @@ export function footprint() {
   g.beginPath(); g.ellipse(26, 70, 5, 16, -0.2, 0, Math.PI * 2); g.fill();
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   cache.set('foot', t);
+  return t;
+}
+
+// ---------------------------------------------------------------------------
+// The world outside the windows: a snowy night, a pale sky, bare black trees
+
+// A bare tree drawn as forking branches. (x, y) is where the limb starts, ang is measured from straight up.
+function drawBranch(g, x, y, ang, len, wid, depth, spread) {
+  const wob = (rnd() - 0.5) * len * 0.3;
+  const x2 = x + Math.sin(ang) * len, y2 = y - Math.cos(ang) * len;
+  g.lineWidth = Math.max(wid, 0.8);
+  g.beginPath(); g.moveTo(x, y);
+  g.quadraticCurveTo((x + x2) / 2 + wob, (y + y2) / 2 + wob * 0.4, x2, y2);
+  g.stroke();
+  if (depth <= 0 || wid < 0.55) return;
+  const kids = depth > 2 && rnd() < 0.3 ? 3 : 2;
+  for (let i = 0; i < kids; i++) {
+    const side = kids === 2 ? (i ? 1 : -1) : i - 1;
+    const a = ang * 0.86 + side * spread * (0.6 + rnd() * 0.8) + (rnd() - 0.5) * 0.3;
+    drawBranch(g, x2, y2, a, len * (0.68 + rnd() * 0.16), wid * 0.68, depth - 1, spread);
+  }
+}
+function drawDeadTree(g, x, base, h, w, spread, depth, col) {
+  g.strokeStyle = col; g.lineCap = 'round'; g.lineJoin = 'round';
+  drawBranch(g, x, base, (rnd() - 0.5) * 0.18, h * 0.22, w, depth, spread);
+}
+
+// Four kinds of tree for the garden: a spreading oak, a thin poplar, a gnarled lopsided one, a dead pine
+export function treeTexture(variant) {
+  const key = 'tree' + variant;
+  if (cache.has(key)) return cache.get(key);
+  const W = 512, H = 768;
+  const [c, g] = canvas(W, H);
+  const col = '#06080b';
+  // draw a little smaller than the card so no crown is ever clipped by its edge
+  g.translate(W / 2, H); g.scale(0.8, 0.8); g.translate(-W / 2, -H);
+  if (variant === 0) drawDeadTree(g, W / 2, H - 2, H, 19, 0.66, 9, col);
+  else if (variant === 1) drawDeadTree(g, W / 2, H - 2, H, 14, 0.4, 9, col);
+  else if (variant === 2) {
+    g.strokeStyle = col; g.lineCap = 'round'; g.lineJoin = 'round';
+    drawBranch(g, W * 0.45, H - 2, 0.22, H * 0.2, 22, 9, 0.6);
+    drawBranch(g, W * 0.45, H * 0.76, -0.9, H * 0.16, 11, 8, 0.55);
+  } else {
+    g.strokeStyle = col; g.lineCap = 'round';
+    g.lineWidth = 12; g.beginPath(); g.moveTo(W / 2, H - 2); g.quadraticCurveTo(W / 2 + 10, H * 0.5, W / 2 - 4, H * 0.04); g.stroke();
+    for (let y = H * 0.82, k = 0; y > H * 0.08; y -= 30 + rnd() * 22, k++) {
+      const len = 20 + (y / H) * 190;
+      for (const s of [-1, 1]) if (rnd() < 0.85) drawBranch(g, W / 2 + 4 * s, y, s * (1.45 + rnd() * 0.3), len * (0.6 + rnd() * 0.4), 3.2, 3, 0.5);
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  cache.set(key, t);
+  return t;
+}
+
+// A hazy forest wall that rings the whole property, seen far off beyond the garden
+export function treeline() {
+  if (cache.has('treeline')) return cache.get('treeline');
+  const W = 4096, H = 512;
+  const [c, g] = canvas(W, H);
+  for (const [n, lo, hi, a, rgb] of [[70, 140, 330, 0.75, '14,19,27'], [90, 190, 460, 1, '7,10,15']]) {
+    for (let i = 0; i < n; i++) {
+      const x = rnd() * W, h = lo + rnd() * (hi - lo), sp = 0.4 + rnd() * 0.3;
+      for (const dx of x < 400 ? [0, W] : x > W - 400 ? [0, -W] : [0]) drawDeadTree(g, x + dx, H + 2, h * 1.6, h * 0.05, sp, 7, `rgba(${rgb},${a})`);
+    }
+  }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  t.wrapS = THREE.RepeatWrapping;
+  cache.set('treeline', t);
+  return t;
+}
+
+// A gnarled branch reaching across a window from outside
+export function branchOverlay() {
+  if (cache.has('branch')) return cache.get('branch');
+  const W = 512, H = 512;
+  const [c, g] = canvas(W, H);
+  g.strokeStyle = '#040608'; g.lineCap = 'round'; g.lineJoin = 'round';
+  drawBranch(g, -12, H * 0.8, 1.1, 190, 22, 8, 0.5);
+  drawBranch(g, W + 12, H * 0.06, -2.1, 150, 12, 7, 0.55);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  cache.set('branch', t);
+  return t;
+}
+
+// Overcast, moonlit night sky wrapped around a dome. Horizon at the vertical middle; the glow
+// behind the cloud is brightest at the horizon so the trees stand out against it.
+export function skyTexture() {
+  if (cache.has('sky')) return cache.get('sky');
+  const W = 1024, H = 512;
+  const [c, g] = canvas(W, H);
+  const gr = g.createLinearGradient(0, 0, 0, H);
+  for (const [p, col] of [[0, '#0a0f18'], [0.17, '#182233'], [0.3, '#2c3b55'], [0.4, '#46587a'], [0.47, '#667a9a'], [0.495, '#7a8ba5'], [0.502, '#07090d'], [1, '#030406']]) gr.addColorStop(p, col);
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  // drifting cloud banks, slightly lighter than the sky behind them
+  for (let i = 0; i < 130; i++) {
+    const x = rnd() * W, y = H * (0.06 + rnd() * 0.42), rx = 50 + rnd() * 150, ry = rx * (0.12 + rnd() * 0.12);
+    for (const dx of [0, -W, W]) {
+      const cg = g.createRadialGradient(x + dx, y, 0, x + dx, y, rx);
+      const dark = rnd() < 0.45;
+      cg.addColorStop(0, dark ? `rgba(6,9,16,${0.12 + rnd() * 0.14})` : `rgba(130,148,178,${0.06 + rnd() * 0.08})`); cg.addColorStop(1, dark ? 'rgba(6,9,16,0)' : 'rgba(130,148,178,0)');
+      g.save(); g.translate(x + dx, y); g.scale(1, ry / rx); g.translate(-(x + dx), -y);
+      g.fillStyle = cg; g.fillRect(x + dx - rx, y - rx, rx * 2, rx * 2); g.restore();
+    }
+  }
+  // the moon, smeared behind the cloud
+  const mx = W * 0.2, my = H * 0.33;
+  g.save(); g.translate(mx, my); g.scale(1.15, 1);
+  const mg = g.createRadialGradient(0, 0, 0, 0, 0, 105);
+  mg.addColorStop(0, 'rgba(240,246,255,0.95)'); mg.addColorStop(0.06, 'rgba(225,235,255,0.8)');
+  mg.addColorStop(0.2, 'rgba(165,180,208,0.22)'); mg.addColorStop(0.55, 'rgba(110,125,155,0.05)'); mg.addColorStop(1, 'rgba(110,125,155,0)');
+  g.fillStyle = mg; g.fillRect(-105, -105, 210, 210); g.restore();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  cache.set('sky', t);
   return t;
 }

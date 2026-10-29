@@ -160,13 +160,32 @@ own; hanging lamps that start to sway; "LET ME IN" breathed onto the bathroom mi
 box tinkling a few notes by itself. Each has its own trigger, and every 35–70 seconds one of them
 also fires at random wherever the player is.
 
+**The dark scare.** Rarely, and only in the basement or attic, your torch stutters and dies for two
+seconds. When it comes back, her face is right in front of you for a heartbeat. The game only counts
+time spent down there or up there, and the scare happens once or twice a game (never every visit,
+never at the same moment twice). It's skipped while you're answering a quiz, climbing, or being hunted.
+`triggerDarkScare()` on the game object fires it on demand when testing.
+
 Look out for portraits that change when you're not looking, notes and diary pages that tell the
 story of Eleanor Vane, writing on the walls, the dollhouse, the telephone, and the bathroom mirror…
 
+## Outside, and her face
+
+Beyond the windows it is a snowy night: a pale overcast sky with the moon smeared behind the cloud,
+snow-covered ground, bare black trees in the garden and a hazy forest wall beyond, all painted at start-up
+(no image files). Snow falls continuously (drawn on the GPU, so it is cheap, and culled inside the house),
+settles on the window sills, and a gnarled branch scratches across some windows. The basement openings
+look out of stone wells up to the snow. Lightning lights the sky and snow up and leaves the trees black.
+
+The entity's face is made of grey smoke: soft-edged, with hollow black eyes and a gaping mouth, wisps
+curling off the head and a slow churn as it floats. It is painted by `smokeFace()` in
+`public/js/textures.js` and is used on the 3D model, in the bathroom mirror, in the dark scare and in the
+jump scare.
+
 ## Graphics settings
 
-"High quality graphics" (on by default on computers, off on tablets) adds torch shadows and floating
-dust. Turn it off in the P menu if a computer struggles. Everything else (lighting, moonlight,
+"High quality graphics" (on by default on computers, off on tablets) adds torch shadows, floating
+dust and a heavier snowfall. Turn it off in the P menu if a computer struggles. Everything else (lighting, moonlight,
 lightning, cobwebs, film grain) is cheap and always on.
 
 ## Project structure
@@ -180,7 +199,7 @@ public/js/main.js         Screens, lobby, cutscene, HUD, quiz, map, networking
 public/js/game3d.js       Three.js house, entity visuals, movement and collision, ambient scares
 public/js/layout.js       Shared house layout (walls, entrances, stairs, rooms, props, lore)
 public/js/audio.js        MP3 role matching plus procedural Web Audio SFX with 3D positioning
-public/js/textures.js     Procedurally painted textures (portraits, wallpaper, silhouettes…)
+public/js/textures.js     Procedurally painted textures (portraits, wallpaper, the smoke face, sky, trees…)
 public/js/controls.js     Keyboard, mouse/touchpad and touch controls
 public/js/startscreen.js  Animated screen-door title backdrop
 public/audio/             Put your MP3s here

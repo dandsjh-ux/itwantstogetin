@@ -189,11 +189,13 @@ socket.on('gameStarting', (d) => {
   audio.stopMusic(2);
   bg.stop();
   if (!S.game) {
-    S.game = new Game3D(document.getElementById('game-root'), controls, { quality: opts.quality });
+    S.game = new Game3D(document.getElementById('game-root'), controls, { quality: opts.quality, canScare: () => S.phase === 'playing' && !S.overlay && !S.quiz });
   } else resetGameWorld();
   S.game.headBob = opts.bob;
   S.game.setPlayers(d.players, S.myId);
   $('#rules-target').textContent = d.settings.target;
+  // paint the jump-scare face now, during the cutscene, so it can't hitch when it's needed
+  setTimeout(() => { jumpscare.url ||= TX.scareImage(); }, 1500);
   runCutscene();
 });
 

@@ -12,11 +12,14 @@ import { isTouch } from './controls.js';
 
 const EYE = 1.6;
 const WALK = 3.3, RUN = 5.2;
+const SNOW_FLAKES = 36000;
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand = (a, b) => a + Math.random() * (b - a);
 const floorOfY = (y) => FLOORS.reduce((best, F) => (y >= F.y - 0.01 ? F.id : best), 0);
 const FOG = [0x040705, 0x030406, 0x040409, 0x05060c];
+// Windows with a bare branch reaching across them from outside
+const BRANCH_WINDOWS = new Set(['living_window', 'dining_window', 'kitchen_window', 'study_window', 'master_window', 'nursery_window', 'bedroom_window']);
 
 // Organic flicker: holds a random level for 50-140 ms and eases towards it, so lights waver
 // instead of strobing frame by frame.
@@ -68,7 +71,8 @@ export class Game3D {
     this.torchFlick = new Flick(); this.globalFlick = new Flick();
     this.entityDim = 1; this.entityPhase = 2; this.entityHidden = 0; this.entityStepT = 0;
     this.lightT = rand(30, 60); this.lightTime = -1; this.flash = 0;
-    this.backdrops = []; this.shafts = [];
+    this.backdrops = []; this.shafts = []; this.branches = [];
+    this.torchMul = 1; this.darkMul = 1;   // the dark-scare dims the torch and the room lights through these
     this.frustum = new THREE.Frustum(); this._pm = new THREE.Matrix4();
     this.staticGeos = new Map();
     this.climb = null;
@@ -106,6 +110,7 @@ export class Game3D {
     this.quality = q;
     this.torch.castShadow = q === 'high';
     if (this.dust) this.dust.visible = q === 'high';
+    if (this.snow) this.snow.geometry.setDrawRange(0, q === 'high' ? SNOW_FLAKES : SNOW_FLAKES * 0.55);
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, q === 'high' ? 1.5 : 1.1));
     this.resize();
   }
@@ -141,6 +146,7 @@ export class Game3D {
     m.cord = L({ color: 0x111111 });
     m.ember = new THREE.MeshBasicMaterial({ color: 0xff5a1a });
     m.plank = L({ color: 0x6b4a2a });
+    m.snow = L({ color: 0x8e9cb2, emissive: 0x1b2531 });
     return m;
   }
 
@@ -243,8 +249,10 @@ export class Game3D {
     gs.holes.push(gh);
     const gg = new THREE.ShapeGeometry(gs);
     const guv = gg.attributes.uv; for (let i = 0; i < guv.count; i++) guv.setXY(i, guv.getX(i) / 200, guv.getY(i) / 200);
-    const ground = new THREE.Mesh(gg, new THREE.MeshLambertMaterial({ map: TX.surface('ground') }));
+    const groundMat = new THREE.MeshLambertMaterial({ map: TX.surface('ground'), emissive: 0x141b27 });
+    const ground = new THREE.Mesh(gg, groundMat);
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02; this.scene.add(ground);
+    this.backdrops.push(groundMat);   // lit up by lightning
 
     // Stairs
     const steps = [];
@@ -275,14 +283,165 @@ export class Game3D {
     this._buildDecor();
     this._buildSalt();
     this._buildAtmosphere();
+    this._buildDarkScare();
     this._buildUncanny();
-    // Static outdoors silhouettes: trees seen through windows
-    const treeMat = new THREE.MeshBasicMaterial({ color: 0x020304 });
-    for (let i = 0; i < 24; i++) {
-      const a = (i / 24) * Math.PI * 2, r = rand(24, 40);
-      const t = new THREE.Mesh(new THREE.ConeGeometry(rand(1.5, 3), rand(9, 16), 6), treeMat);
-      t.position.set(Math.cos(a) * r, 4, Math.sin(a) * r * 0.8); this.scene.add(t);
+    this._buildOutdoors();
+  }
+
+  // ------------------------------------------------------------------ the dark scare
+  // Rare, and only in the basement or attic: the torch stutters and dies for two seconds, and when it comes
+  // back her smoke face is right in front of you for a heartbeat. At most once or twice a game.
+  _buildDarkScare() {
+    const g = new THREE.Group(); g.visible = false;
+    const mat = (map) => new THREE.MeshBasicMaterial({ map, transparent: true, depthTest: false, depthWrite: false, fog: false });
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), mat(TX.radial('rgba(0,0,0,0.92)', 'rgba(0,0,0,0)')));
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 1.35), mat(TX.screamFace()));
+    halo.renderOrder = 998; face.renderOrder = 999; halo.position.z = -0.02;
+    g.add(halo, face);
+    this.camera.add(g);
+    this.darkHead = { g, face };
+  }
+
+  _resetDarkScare() {
+    this.dark = { zoneT: 0, need: rand(14, 40), fired: 0, max: Math.random() < 0.5 ? 1 : 2, cd: 0, phase: null, t: 0, flashed: false };
+    this._endDarkScare();
+  }
+
+  triggerDarkScare() {
+    const d = this.dark;
+    if (d.phase) return;
+    d.phase = 'flicker'; d.t = 0; d.flashed = false; d.fired++;
+    d.zoneT = 0; d.need = rand(35, 80); d.cd = rand(120, 200);   // a second one, if any, comes much later
+    audio.duck(0.35, 4);
+  }
+
+  _endDarkScare() {
+    this.torchMul = 1; this.darkMul = 1;
+    this.ambient.intensity = 0.45; this.hemi.intensity = 0.35;
+    if (this.darkHead) this.darkHead.g.visible = false;
+    if (this.dark) { this.dark.phase = null; this.dark.t = 0; }
+  }
+
+  _updateDarkScare(dt) {
+    const d = this.dark, P = this.player;
+    if (!d) return;
+    if (d.phase) {
+      if (this.entity || this.frozen || this.me?.cg) return this._endDarkScare();   // something real took over
+      d.t += dt;
+      const t = d.t, FLICKER = 1.4, OFF = 2.0, FLASH = 0.4, TAIL = 1.0;
+      const k = (v, a, b) => clamp((v - a) / (b - a), 0, 1);
+      if (t < FLICKER) {
+        // the light stutters, dropping out more and more
+        const p = t / FLICKER, wob = Math.sin(t * 58) + Math.sin(t * 37 + 2) + Math.sin(t * 91 + 1);
+        const on = wob > -1.8 + p * 3.6 ? 1 : 0.06;
+        this.torchMul = lerp(this.torchMul, on, Math.min(1, dt * 40));
+        this.darkMul = lerp(this.darkMul, 1 - 0.5 * p * (1 - on), Math.min(1, dt * 20));
+      } else if (t < FLICKER + OFF) {
+        if (d.phase !== 'off') { d.phase = 'off'; audio.play('whisper', { pos: { x: P.x + rand(-1, 1), y: P.y + 1.5, z: P.z + rand(-1, 1) }, vol: 0.5 }); }
+        this.torchMul = lerp(this.torchMul, 0, Math.min(1, dt * 30));
+        this.darkMul = lerp(this.darkMul, 0.05, Math.min(1, dt * 12));
+        this.ambient.intensity = 0.45 * 0.18; this.hemi.intensity = 0.35 * 0.18;
+      } else {
+        const u = t - FLICKER - OFF;   // seconds since the light came back
+        if (!d.flashed) {
+          d.flashed = true; d.phase = 'flash';
+          this.ambient.intensity = 0.45; this.hemi.intensity = 0.35; this.darkMul = 1;
+          this.torchMul = 1.5; this.flicker = 0.9;
+          audio.play('stinger', { vol: 1.1 }); audio.play('whisper', { vol: 0.9 }); audio.duck(0.25, 2.5);
+          const h = this.darkHead; h.g.rotation.z = rand(-0.25, 0.25); h.g.visible = true;
+        }
+        this.torchMul = lerp(this.torchMul, 1, Math.min(1, dt * 6));
+        const h = this.darkHead;
+        if (u < FLASH) {
+          // she lunges at you out of the dark, then is simply gone
+          const e = k(u, 0, 0.28);
+          h.g.position.set(Math.sin(u * 90) * 0.012, Math.cos(u * 70) * 0.01, -(1.0 - 0.4 * e * e));
+          h.g.scale.setScalar(1 + 0.3 * e);
+          h.face.material.opacity = 1 - k(u, 0.28, FLASH) * 0.6;
+        } else h.g.visible = false;
+        if (u > FLASH + TAIL) this._endDarkScare();
+      }
+      return;
     }
+    // directing it: only counts time spent in the basement or attic, and never every visit
+    if (!this.running || this.entity || this.climb || this.frozen || this.me?.cg || this.runTime < 60) return;
+    d.cd -= dt;
+    if ((P.f !== 0 && P.f !== 3) || d.fired >= d.max || d.cd > 0 || this.hooks.canScare?.() === false) return;
+    d.zoneT += dt;
+    if (d.zoneT >= d.need) this.triggerDarkScare();
+  }
+
+  // A snowy night beyond the glass: pale overcast sky, a ring of far-off forest, bare black trees
+  // standing in the garden, and snow that never stops falling.
+  _buildOutdoors() {
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(60, 48, 24), new THREE.MeshBasicMaterial({ map: TX.skyTexture(), side: THREE.BackSide, fog: false, depthWrite: false }));
+    sky.renderOrder = -10; sky.frustumCulled = false; this.scene.add(sky);
+    this.sky = sky; this.backdrops.push(sky.material);
+
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(46, 46, 30, 96, 1, true), new THREE.MeshBasicMaterial({ map: TX.treeline(), transparent: true, alphaTest: 0.01, side: THREE.BackSide, depthWrite: false, fog: false }));
+    ring.position.y = 15; ring.renderOrder = -9; ring.frustumCulled = false; this.scene.add(ring);
+
+    // trees in the garden, each a flat card turned to face the house
+    const mats = [0, 1, 2, 3].map((v) => new THREE.MeshBasicMaterial({ map: TX.treeTexture(v), transparent: true, alphaTest: 0.02, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+    for (let i = 0, n = 0; n < 36 && i < 400; i++) {
+      const x = rand(-42, 42), z = rand(-36, 36);
+      if (Math.abs(x) < 22 && Math.abs(z) < 18.5) continue;   // keep the garden around the house clear
+      if (Math.hypot(x, z) > 42) continue;
+      const h = rand(9, 17), v = n % 4;
+      const geo = new THREE.PlaneGeometry(h * 2 / 3, h); geo.translate(0, h / 2, 0);
+      const t = new THREE.Mesh(geo, mats[v]);
+      t.position.set(x, -0.02, z); t.rotation.y = Math.atan2(-x, -z); t.scale.x = Math.random() < 0.5 ? -1 : 1;
+      this.scene.add(t); n++;
+    }
+
+    // falling snow: all motion happens in the vertex shader. Flakes inside the house are culled there.
+    const pos = new Float32Array(SNOW_FLAKES * 3), seed = new Float32Array(SNOW_FLAKES * 2);
+    for (let i = 0; i < SNOW_FLAKES; i++) {
+      let x, z;
+      do { x = rand(-26, 26); z = rand(-22, 22); } while (Math.abs(x) < 14.6 && Math.abs(z) < 10.6);
+      pos.set([x, rand(0, 20), z], i * 3);
+      seed.set([rand(0, 6.28), Math.random()], i * 2);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 2));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uScale: { value: 700 }, uFlash: { value: 0 } },
+      transparent: true, depthWrite: false,
+      vertexShader: `
+        uniform float uTime; uniform float uScale;
+        attribute vec2 aSeed;
+        varying float vAlpha;
+        void main() {
+          float r = aSeed.y;
+          float y = mod(position.y - uTime * (0.9 + r * 1.1), 20.0);
+          float sway = uTime * (0.5 + r * 0.4) + aSeed.x;
+          float x = mod(position.x + sin(sway) * 0.6 + uTime * 0.45 + 26.0, 52.0) - 26.0;
+          float z = position.z + cos(sway * 0.83) * 0.5;
+          if (abs(x) < 14.3 && abs(z) < 10.3 && y < 9.9) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }
+          vec4 mv = modelViewMatrix * vec4(x, y, z, 1.0);
+          float raw = (0.04 + r * 0.07) * uScale / -mv.z;
+          gl_PointSize = clamp(raw, 1.6, 26.0);
+          vAlpha = clamp(raw / 1.6, 0.3, 1.0) * smoothstep(0.0, 1.0, y) * (1.0 - smoothstep(18.0, 20.0, y)) * (1.0 - smoothstep(20.0, 26.0, abs(x))) * (1.0 - smoothstep(16.0, 22.0, abs(z)));
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        uniform float uFlash; varying float vAlpha;
+        void main() {
+          float a = smoothstep(0.5, 0.12, length(gl_PointCoord - 0.5)) * vAlpha;
+          if (a < 0.01) discard;
+          gl_FragColor = vec4(vec3(0.82, 0.9, 1.0) * (1.0 + uFlash * 1.5), a * 0.9);
+        }`,
+    });
+    this.snow = new THREE.Points(geo, mat);
+    this.snow.frustumCulled = false; this.snow.renderOrder = 4;
+    this.scene.add(this.snow);
+  }
+
+  _updateOutdoors(dt) {
+    this.sky.position.copy(this.camera.position);
+    this.snow.material.uniforms.uTime.value = this.time;
+    for (const b of this.branches) b.rotation.z = Math.sin(this.time * 0.6 + b.userData.ph) * 0.02;
   }
 
   _buildEntrance(e) {
@@ -294,13 +453,8 @@ export class Game3D {
     const obj = { e, grp, A };
     const box = (w, h, d, mat, x, y, z, parent = grp) => { const m = new THREE.Mesh(boxGeo(w, h, d, 1), mat); m.position.set(x, y, z); parent.add(m); return m; };
     const H = (e.t || 0) - (e.b || 0), W = e.w || 1;
-    const backdrop = (w, h) => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: TX.radial('rgba(48,64,90,0.95)', 'rgba(3,5,9,1)'), fog: false }));
-      m.position.set(0, 0, -3.2); grp.add(m); this.backdrops.push(m.material); return m;
-    };
     switch (e.kind) {
       case 'window': {
-        backdrop(W * 3.2, H * 2.6);
         if (e.round) {
           const ring = new THREE.Mesh(new THREE.TorusGeometry(W / 2, 0.06, 8, 24), this.mats.frame); grp.add(ring);
           const gl = new THREE.Mesh(new THREE.CircleGeometry(W / 2, 24), this.mats.glass); grp.add(gl); obj.glass = gl;
@@ -310,6 +464,7 @@ export class Game3D {
           box(W + 0.12, 0.08, 0.3, fr, 0, H / 2, 0); box(W + 0.12, 0.1, 0.4, fr, 0, -H / 2, 0.06);
           box(0.08, H, 0.3, fr, -W / 2, 0, 0); box(0.08, H, 0.3, fr, W / 2, 0, 0);
           box(0.05, H, 0.06, fr, 0, 0, 0); box(W, 0.05, 0.06, fr, 0, H * 0.1, 0);
+          box(W + 0.1, 0.07, 0.22, this.mats.snow, 0, -H / 2 + 0.07, -0.12);   // snow settled on the outer sill
           const gl = new THREE.Mesh(new THREE.PlaneGeometry(W, H), this.mats.glass); grp.add(gl); obj.glass = gl;
           // tattered curtains
           for (const sx of [-1, 1]) {
@@ -323,12 +478,16 @@ export class Game3D {
         const sh = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ map: TX.shaft(), transparent: true, opacity: 0.07, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
         sh.position.set(0, H * 0.35, 0.15); sh.rotation.x = -0.95; sh.renderOrder = 2; grp.add(sh);
         this.shafts.push(sh.material);
+        if (BRANCH_WINDOWS.has(e.id)) {
+          const br = new THREE.Mesh(new THREE.PlaneGeometry(W * 2.6, W * 2.6), new THREE.MeshBasicMaterial({ map: TX.branchOverlay(), transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide }));
+          br.position.set(0, H * 0.1, -0.6); br.scale.x = this.branches.length % 2 ? -1 : 1; br.userData = { ph: Math.random() * 6 };
+          grp.add(br); this.branches.push(br);
+        }
         const hp = new THREE.Mesh(new THREE.PlaneGeometry(W * 0.8, H * 0.6), new THREE.MeshBasicMaterial({ map: TX.handprints(), transparent: true, opacity: 0, depthWrite: false }));
         hp.position.set(0, 0.1, 0.01); grp.add(hp); obj.prints = hp;
         break;
       }
       case 'door': {
-        backdrop(W * 3, H * 2);
         const pivot = new THREE.Group(); pivot.position.set(-W / 2, 0, 0.05); grp.add(pivot);
         const door = box(W - 0.04, H - 0.02, 0.08, this.mats.darkwood, W / 2, 0, 0, pivot);
         box(0.08, 0.08, 0.08, this.mats.brass, W - 0.15, -0.1, 0.07, pivot);
@@ -338,7 +497,6 @@ export class Game3D {
         break;
       }
       case 'chute': case 'vent': case 'flap': {
-        backdrop(W * 2, H * 3);
         const pivot = new THREE.Group(); pivot.position.set(0, H / 2, 0.02); grp.add(pivot);
         if (e.kind === 'vent') {
           for (let i = 0; i < 5; i++) box(W, 0.03, 0.04, this.mats.metal, 0, -H * 0.1 - i * (H / 5), 0, pivot);
@@ -376,12 +534,18 @@ export class Game3D {
         if (e.kind === 'hatch') box(1.0, 0.06, 1.0, this.mats.wood, 0.5, 0, 0, pivot);
         else {
           const gl = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mats.glass); gl.rotation.x = Math.PI / 2; gl.position.set(0.5, 0, 0); pivot.add(gl);
-          const sky = new THREE.Mesh(new THREE.PlaneGeometry(3, 3), new THREE.MeshBasicMaterial({ map: TX.radial('rgba(48,64,90,0.95)', 'rgba(3,5,9,1)'), fog: false }));
-          sky.rotation.x = Math.PI / 2; sky.position.y = 2.5; grp.add(sky); this.backdrops.push(sky.material);
         }
         obj.pivot = pivot;
         break;
       }
+    }
+    if (e.f === 0 && e.n && e.kind !== 'drain') {
+      // below ground: a stone well running up to the snow, so the opening looks out at something
+      const D = e.kind === 'window' ? 2.4 : 1.4, wellW = W + 1.2;
+      const gy = -0.02 - A.y, bot = e.kind === 'window' ? -1.9 : e.kind === 'door' ? -H / 2 : -H / 2 - 0.5, hh = gy - bot, cy = (gy + bot) / 2;
+      box(wellW, hh, 0.14, this.mats.stone, 0, cy, -D);
+      for (const sx of [-1, 1]) box(0.14, hh, D, this.mats.stone, sx * wellW / 2, cy, -D / 2);
+      box(wellW, 0.08, D, this.mats.snow, 0, bot + 0.04, -D / 2);
     }
     grp.traverse((o) => { if (o.isMesh && o.material.isMeshLambertMaterial) o.castShadow = o.receiveShadow = true; });
     this.entranceObjs.set(e.id, obj);
@@ -627,7 +791,7 @@ export class Game3D {
     const mir = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.8), new THREE.MeshBasicMaterial({ color: 0x1b2128 }));
     mir.position.set(-8, FLOORS[2].y + 1.6, -9.83); this.scene.add(mir);
     const mf = new THREE.Mesh(boxGeo(0.7, 0.9, 0.03, 1), this.mats.gold); mf.position.set(-8, FLOORS[2].y + 1.6, -9.865); this.scene.add(mf);
-    const ghost = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.42), new THREE.MeshBasicMaterial({ map: TX.womanFace(), transparent: true, opacity: 0 }));
+    const ghost = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.46), new THREE.MeshBasicMaterial({ map: TX.womanFace(), transparent: true, opacity: 0, depthWrite: false }));
     ghost.position.set(-7.85, FLOORS[2].y + 1.62, -9.82); this.scene.add(ghost);
     this.mirror = { pos: new THREE.Vector3(-8, FLOORS[2].y + 1.6, -9.85), ghost, t: 0, cd: 0, count: 0 };
 
@@ -711,9 +875,15 @@ export class Game3D {
     dress.position.y = 0.06;
     const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.14, 8), M.skin); neck.position.y = 1.56; g.add(neck);
     const head = new THREE.Group(); head.position.y = 1.7; g.add(head);
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 12), M.skin); skull.scale.set(0.9, 1.1, 0.95); head.add(skull);
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.22), new THREE.MeshBasicMaterial({ map: TX.womanFace(), color: 0xd0d0d0, transparent: true, fog: false }));
-    face.position.set(0, -0.015, 0.118); head.add(face);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.115, 14, 12), M.hair); skull.scale.set(0.9, 1.1, 0.95); head.add(skull);
+    // her face is smoke: soft-edged and curved a little around the head, with mist spilling over the hair
+    const fg = new THREE.PlaneGeometry(0.43, 0.43, 8, 1);
+    const fgp = fg.attributes.position; for (let i = 0; i < fgp.count; i++) fgp.setZ(i, -0.8 * fgp.getX(i) ** 2);
+    const face = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ map: TX.womanFace(), color: 0xffffff, transparent: true, depthWrite: false, fog: false }));
+    face.position.set(0, 0, 0.122); face.renderOrder = 3; head.add(face);
+    // a dark halo behind the smoke so the pale face still reads against snow and sky
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.7), new THREE.MeshBasicMaterial({ map: TX.radial('rgba(0,0,0,0.5)', 'rgba(0,0,0,0)'), transparent: true, depthWrite: false, fog: false }));
+    halo.position.set(0, -0.08, -0.02); halo.renderOrder = 2; head.add(halo);
     // long black hair: hangs down the back, a crown over the top and strands framing the face
     const back = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.26, 1.0, 14, 1, true, Math.PI * 0.28, Math.PI * 1.44), M.hair);
     back.position.y = -0.4; head.add(back);
@@ -733,9 +903,17 @@ export class Game3D {
       sh.rotation.z = sx * 0.08;
       arms.push(sh);
     }
-    g.userData = { head, arms, strands, dress };
+    g.userData = { head, arms, strands, dress, face, fph: Math.random() * 6 };
     g.traverse((o) => { if (o.isMesh && o.material.isMeshLambertMaterial) o.castShadow = true; });
     return g;
+  }
+
+  // The smoke of her face slowly churns
+  faceDrift(ud, t) {
+    const f = ud.face, k = ud.fph;
+    f.scale.set(1 + Math.sin(t * 1.3 + k) * 0.03, 1 + Math.sin(t * 0.9 + k * 2) * 0.05, 1);
+    f.rotation.z = Math.sin(t * 0.7 + k) * 0.05;
+    f.material.opacity = 0.86 + Math.sin(t * 2.1 + k) * 0.08 + Math.sin(t * 5.3 + k * 3) * 0.04;
   }
 
   // Hem drifts as if in a wind that isn't there
@@ -971,7 +1149,7 @@ export class Game3D {
           const ud = P.woman.userData;
           ud.arms.forEach((a, i) => { a.rotation.x = -lerp(0.4, 1.35, clamp(p, 0, 1)) + Math.sin(t * 2 + i) * 0.05; a.rotation.z = (i ? 1 : -1) * 0.25; });
           ud.head.rotation.z = Math.sin(t * 0.5) * 0.25;
-          this.waveDress(ud.dress, t);
+          this.waveDress(ud.dress, t); this.faceDrift(ud, t);
           ud.strands.forEach((s, i) => (s.rotation.x = Math.sin(t * 1.3 + i) * 0.08));
         }
         if (P.sil) {
@@ -985,6 +1163,7 @@ export class Game3D {
       case 'skylight': {
         P.woman.position.set(Math.sin(t * 0.5) * 0.05, 0.22 + (1 - clamp(p, 0, 1)) * 0.9, -1.7);
         P.woman.userData.arms.forEach((a, i) => { a.rotation.x = -2.2 + Math.sin(t * 2 + i) * 0.1; a.rotation.z = (i ? 1 : -1) * 0.5; });
+        this.faceDrift(P.woman.userData, t);
         break;
       }
       case 'door': {
@@ -1250,8 +1429,8 @@ export class Game3D {
     this.flicker = Math.max(0, this.flicker - dt);
     const near = this.entity ? this.entity.position.distanceTo(this.camera.position) : 99;
     const tAmt = this.flicker > 0 ? 0.85 : near < 8 ? 0.6 * (1 - near / 8) : 0;
-    this.torch.intensity = (this.torchOn ? 26 : 0) * this.torchFlick.step(dt, tAmt, this.flicker > 0 ? 1.3 : 0.8);
-    this.fill.intensity = this.torchOn ? 1.4 : 0.5;
+    this.torch.intensity = (this.torchOn ? 26 : 0) * this.torchFlick.step(dt, tAmt, this.flicker > 0 ? 1.3 : 0.8) * this.torchMul;
+    this.fill.intensity = (this.torchOn ? 1.4 : 0.5) * this.torchMul;
     const dip = this.globalFlick.step(dt, this.flicker > 0 ? 0.85 : 0, 1.2);
     this.entityDim = lerp(this.entityDim, this.entity ? 0.35 : 1, Math.min(1, dt * 2));
     for (const r of this.roomLights) {
@@ -1262,11 +1441,12 @@ export class Game3D {
         if (r.dipT <= 0) { r.dipT = rand(20, 50); r.dip = 0.6; }
         if (r.dip > 0) { r.dip -= dt; k *= 1 - 0.7 * Math.sin(Math.PI * clamp(1 - r.dip / 0.6, 0, 1)); }
       }
-      const i = r.base * k * dip * this.entityDim;
+      const i = r.base * k * dip * this.entityDim * this.darkMul;
       r.l.intensity = i;
       if (r.bulbMat) { const f = i / r.base; r.bulbMat.color.copy(r.bulbCol).multiplyScalar(0.25 + 0.75 * f); r.glow.material.opacity = f; }
     }
     this._updateLightning(dt);
+    this._updateOutdoors(dt);
     // fog tint per floor: greener basement, colder attic
     const fogC = new THREE.Color(FOG[this.player.f]);
     this.scene.fog.color.lerp(fogC, Math.min(1, dt * 1.5)); this.scene.background.copy(this.scene.fog.color);
@@ -1330,7 +1510,7 @@ export class Game3D {
       const tgt = b.tgt === this.myId ? this.camera.position : (this.others.get(b.tgt)?.g.position || this.camera.position);
       E.rotation.y = Math.atan2(tgt.x - E.position.x, tgt.z - E.position.z);
       const ud = E.userData;
-      this.waveDress(ud.dress, t);
+      this.waveDress(ud.dress, t); this.faceDrift(ud, t);
       ud.arms.forEach((a, i) => { a.rotation.x = -1.3 + Math.sin(t * 4 + i * 2) * 0.12; });
       // occasional head jerk, held for a moment rather than jittering every frame
       this.entityTwitch = (this.entityTwitch || 0) - dt;
@@ -1399,6 +1579,7 @@ export class Game3D {
 
     this._ambientScares(dt);
     this._updateUncanny(dt);
+    this._updateDarkScare(dt);
     this._phone(dt);
   }
 
@@ -1407,7 +1588,7 @@ export class Game3D {
     this.lightT -= dt;
     if (this.lightT <= 0) {
       this.lightT = rand(45, 95);
-      if (!this.entity && this.running) {
+      if (!this.entity && this.running && !this.dark?.phase) {
         this.lightTime = 0;
         setTimeout(() => audio.play('thunder', { vol: 0.8, dur: rand(3.5, 5) }), rand(600, 1800));
       }
@@ -1421,6 +1602,7 @@ export class Game3D {
     if (Math.abs(f - this.flash) < 0.002 && f === 0) return;
     this.flash = f;
     for (const m of this.backdrops) m.color.setScalar(1 + f * 2.6);
+    this.snow.material.uniforms.uFlash.value = f;
     for (const m of this.shafts) m.opacity = 0.07 * (1 + f * 5);
     this.ambient.intensity = 0.45 + f * 0.45;
   }
@@ -1453,7 +1635,7 @@ export class Game3D {
       const d = hit ? hit.distance - 0.6 : 12;
       if (d < 4) return;
       const w = this.glimpse || (this.glimpse = this.makeWoman());
-      w.visible = true;
+      w.visible = true; this.faceDrift(w.userData, this.time);
       w.position.set(P.x + fwd.x * d, P.y, P.z + fwd.z * d);
       w.rotation.y = Math.atan2(-fwd.x, -fwd.z);
       this.scene.add(w);
@@ -1606,6 +1788,7 @@ export class Game3D {
     u.writings.forEach((w) => { w.state = 'hidden'; w.m.material.opacity = 0; w.cd = rand(50, 110); });
     u.mirrorText.material.opacity = 0; this.mirror.count = 0;
     u.ball.visible = false; u.ballDone = false; u.ballRoll = null;
+    this._resetDarkScare();
     u.pianoCd = rand(30, 60); u.radioCd = rand(20, 50); u.radioOn = 0; u.tapsCd = 10; u.dirT = rand(40, 70);
     for (const c of this.creepyChairs || []) c.grp.rotation.y = c.rest;
     for (const n of this.notes || []) n.read = false;
@@ -1807,6 +1990,7 @@ export class Game3D {
     this.camera.updateProjectionMatrix();
     this.vmCamera.aspect = w / h;
     this.vmCamera.updateProjectionMatrix();
+    if (this.snow) this.snow.material.uniforms.uScale.value = this.renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
   }
 
   start() {
