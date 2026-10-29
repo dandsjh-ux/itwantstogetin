@@ -105,16 +105,27 @@ intensity, and it ramps up over the first two minutes.
 
 ## Vocabulary
 
-`server/vocab.js` holds about 75 words per level (223 in total), each with a definition, synonyms,
-an antonym and a house-themed example sentence. Questions are generated on the fly in five styles
-(definition → word, word → definition, fill the gap, synonym, antonym). Wrong options are always
-drawn from a different meaning group, so there's only one right answer. Recently used words are
-avoided, and the results screen lists the words to review.
+`server/vocab.js` holds about 65–70 words per level (199 in total), each with a short definition,
+synonyms, an opposite and a house-themed example sentence. The words are pitched **a couple of school
+years below the level's label** and chosen for atmosphere and tone: how a haunted house looks, sounds,
+feels and smells, and the mood of a scene.
+
+| Level | Sample words |
+|---|---|
+| Year 3/4 | scary, dark, creak, whisper, icy, dusty, spooky, creep, shiver, lonely |
+| Year 6/7 | gloomy, eerie, lurk, tremble, slither, mouldy, hollow, tense, glimpse, mysterious |
+| Year 9/10 | ominous, menacing, dread, desolate, rickety, translucent, sombre, cower, relentless, banish |
+
+Questions are generated on the fly in five styles (a sentence to complete, definition → word,
+word → definition, similar meaning, opposite). Complete-the-scene sentences come up most, and the
+Year 3/4 level skips "similar meaning". Wrong options always come from a different meaning group, so
+only one answer fits, and they match the right answer's part of speech so grammar can't give it away.
+Recently used words are avoided, and the results screen lists the words to review.
 
 Add words by appending lines in the format:
 
 ```
-word|definition|synonym1,synonym2|antonym|Sentence with ___ for the word.|category
+word|definition|synonym1,synonym2 (or -)|antonym (or -)|Sentence with ___ for the word.|category|adj/noun/verb
 ```
 
 ## The house

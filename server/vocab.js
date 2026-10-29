@@ -1,245 +1,226 @@
 // Vocabulary database for "It Wants To Get In".
-// Format per line: word | definition | synonyms (comma) | antonym | sentence with ___ | category
-// Distractors are always drawn from a different category, so options never overlap in meaning.
+// Words are pitched a couple of school years BELOW each level's label and chosen for atmosphere:
+// how things look, sound, feel and smell in a haunted house, and the tone/mood of a scene.
+//
+// Format per line: word | definition | synonyms (comma, or -) | antonym (or -) | sentence with ___ | category | part of speech
+// Distractors always come from a different category (so only one answer fits) and, where possible,
+// the same part of speech (so grammar never gives the answer away).
 
 const RAW = {
   y34: `
-scary|making you feel afraid|frightening,spooky|comforting|The ___ noise came from the dark basement.|fear
-creepy|giving you an unpleasant, shivery feeling|spooky,eerie|pleasant|A ___ hand slid under the door.|fear
-dreadful|very bad or frightening|awful,terrible|wonderful|A ___ smell drifted out of the chimney.|fear
-horrible|very unpleasant or frightening|awful,nasty|lovely|The ___ face vanished from the glass.|fear
-spooky|strange and a little bit scary, as if ghosts are near|eerie,creepy|ordinary|The empty house felt ___ at midnight.|ghost
-ghostly|pale, misty and see-through, like a ghost|spooky,phantom|solid|A ___ figure floated past the window.|ghost
-haunted|visited by ghosts or spirits|cursed,spooked||Everyone in the village says this house is ___.|ghost
-ghost|the spirit of a dead person that some people believe they can see|spirit,phantom||A ___ in a white dress drifted down the hall.|ghost
-vanish|to disappear suddenly|disappear,fade|appear|Blink, and the face in the window will ___.|ghost
-gloomy|dark and dull, without much light|dim,dreary|bright|The attic was ___ and full of shadows.|dark
-dim|not bright; with only a little light|faint,murky|bright|The ___ candle barely lit the hallway.|dark
-shadowy|full of shadows and hard to see clearly|dark,murky|sunny|Something moved in the ___ corner.|dark
-pitch-black|completely dark|inky,lightless|bright|The cellar was ___ when the torch went out.|dark
-shadow|a dark shape made when something blocks the light|shade,outline|light|A tall ___ crossed the curtain.|dark
-foggy|full of thick mist, so it is hard to see|misty,hazy|clear|The garden was ___ and grey.|dark
-flicker|to shine on and off in an unsteady way|blink,waver||The lights ___ whenever it is near.|light
-glow|to give out a soft, steady light|shine,gleam||Two eyes began to ___ in the dark garden.|light
-silent|making no sound at all|quiet,hushed|noisy|The house went ___ — then came a knock.|sound
-creaky|making a long squeaking sound when moved|squeaky,groaning|silent|The ___ stairs gave away every step.|sound
-whisper|to speak very softly|murmur,mutter|shout|Something began to ___ through the keyhole.|sound
-howl|to make a long, loud, sad cry|wail,yowl|hush|The wind began to ___ around the chimney.|sound
-shriek|a sudden, high, loud scream|screech,scream|whisper|A ___ echoed from the attic.|sound
-moan|a long, low sound of pain or sadness|groan,wail|laugh|A low ___ came from inside the fireplace.|sound
-rattle|to shake and make quick knocking noises|clatter,shake||The window began to ___ in its frame.|sound
-thud|a dull, heavy sound|thump,bump||There was a ___ on the roof above.|sound
-tap|to hit something lightly again and again|knock,patter||Long fingernails began to ___ on the glass.|sound
-scratch|to scrape with something sharp, like nails or claws|scrape,claw||You hear claws ___ at the back door.|sound
-bang|a sudden, loud noise|crash,boom||A loud ___ came from the basement.|sound
-afraid|feeling fear|scared,frightened|brave|You are not ___ of the dark... are you?|feeling
-nervous|worried and a little afraid about something|anxious,jittery|calm|The ___ child peeked around the door.|feeling
-terrified|extremely frightened|petrified,horrified|calm|She was ___ when the door handle turned.|feeling
-lonely|sad because you are alone|alone,friendless||The house felt ___ without your parents.|feeling
-trapped|unable to get away or escape|stuck,caught|free|You feel ___ inside the locked house.|feeling
-brave|ready to face danger without running away|bold,fearless|cowardly|Be ___ and go down to the basement.|trait
-cautious|careful to avoid danger|careful,wary|careless|Be ___ when you open the cellar door.|trait
-curious|wanting to find out about something|nosy,interested|uninterested|The ___ cat stared up at the attic hatch.|trait
-wicked|very bad or evil|evil,nasty|good|A ___ laugh drifted down the chimney.|trait
-sneaky|doing things secretly so no one notices|sly,secretive|honest|The ___ shadow slipped behind the curtain.|trait
-tremble|to shake because you are cold or scared|shiver,quiver||Your hands ___ as you hold the torch.|move
-lurk|to wait somewhere hidden, ready to jump out|hide,prowl||Something likes to ___ under the stairs.|move
-creep|to move slowly and quietly|sneak,tiptoe|stomp|You ___ down the hall so it won't hear you.|move
-crawl|to move on hands and knees, close to the ground|creep,wriggle||Something began to ___ out of the coal chute.|move
-scurry|to run with quick, short steps|scamper,dash|dawdle|Mice ___ away from the cellar door.|move
-shiver|to shake a little because of cold or fear|tremble,quake||The cold air in the hall made you ___.|cold
-icy|very cold, like ice|freezing,frosty|warm|An ___ breath touched the back of your neck.|cold
-chilly|cold enough to be uncomfortable|cold,nippy|warm|The hallway grew ___ as it came closer.|cold
-frosty|covered with frost; very cold|icy,wintry|hot|___ fingerprints appeared on the window.|cold
-clammy|unpleasantly damp and sticky|damp,sweaty|dry|A ___ hand touched yours in the dark.|cold
-damp|slightly wet|moist,soggy|dry|The basement walls were ___ and smelled of mould.|decay
-dusty|covered with dust|grimy,dirty|clean|___ old photos lay on the attic floor.|decay
-rotten|old and gone bad|decayed,mouldy|fresh|The floorboards were ___ and soft.|decay
-mouldy|covered in fuzzy growth caused by damp|musty,rotten|fresh|A ___ smell rose from the drain.|decay
-broken|damaged and in pieces|smashed,cracked|fixed|A ___ window let the cold wind in.|decay
-cracked|having thin lines where it has started to break|split,chipped|whole|The ___ mirror showed two of you.|decay
-slimy|covered in something wet and slippery|slippery,gooey|dry|A ___ trail led away from the drain.|decay
-crooked|bent or twisted, not straight|bent,twisted|straight|The ___ portrait hung from one nail.|look
-pale|having very little colour; almost white|white,colourless|rosy|A ___ face pressed against the window.|look
-hollow|empty inside|empty,sunken|solid|The figure stared with ___ eyes.|look
-bony|so thin that the bones show|skinny,scrawny|plump|A ___ hand reached through the cat flap.|look
-jagged|with rough, sharp, uneven edges|sharp,spiky|smooth|___ glass stuck out of the window frame.|look
-tangled|twisted together in a messy way|knotted,matted|neat|Her ___ black hair hung over her face.|look
-strange|unusual and hard to understand|odd,weird|normal|A ___ smell filled the kitchen.|mood
-weird|very strange or odd|odd,bizarre|normal|There was a ___ scratching inside the walls.|mood
-stormy|with strong winds, rain and thunder|wild,blustery|calm|It was a ___ night with no stars.|mood
-grim|serious, dark and unpleasant|bleak,stern|cheerful|The man in the portrait had a ___ face.|mood
-sudden|happening quickly, without warning|quick,unexpected|gradual|A ___ bang made everyone jump.|mood
-empty|with nothing or no one inside|bare,vacant|full|The rocking chair was ___ — but it was still rocking.|place
-abandoned|left behind and no longer cared for|deserted,left|cared-for|An ___ doll sat on the stairs.|place
-gigantic|extremely big|huge,enormous|tiny|A ___ shadow filled the doorway.|size
-enormous|very large|huge,massive|tiny|An ___ spider hung above the bed.|size
-tiny|very small|little,small|huge|___ footprints led across the dusty floor.|size
-narrow|thin, not wide|thin,slim|wide|The ___ stairs led up to the attic.|size
-ancient|very, very old|old,aged|new|An ___ clock ticked in the hall.|age
+scary|makes you feel afraid|frightening|nice|The dark cellar was very ___.|fear|adj
+afraid|feeling fear|scared|brave|I was ___ of the noise in the dark.|feel|adj
+frightened|very scared|scared,afraid|calm|The ___ girl hid under her bed.|feel|adj
+nervous|a bit worried and shaky inside|worried|calm|He felt ___ on the dark stairs.|feel|adj
+brave|not afraid, even when things are scary|bold|scared|The ___ boy opened the creaky door.|trait|adj
+dark|with no light|-|bright|The cellar was so ___ I could not see my hand.|dark|adj
+dim|with only a little light|faint|bright|A ___ candle lit the hall.|dark|adj
+shadow|a dark shape made when light is blocked|shade|light|A tall ___ moved across the wall.|dark|noun
+night|the time when it is dark outside|-|day|The ghost only comes out at ___.|dark|noun
+mist|thin cloud near the ground|fog|-|Thick ___ covered the garden.|dark|noun
+moon|the bright round light in the night sky|-|-|The ___ shone through the dusty window.|light|noun
+candle|a stick of wax that gives a small light|-|-|The ___ flickered and went out.|light|noun
+flicker|to shine on and off|blink|-|The lights began to ___.|light|verb
+glow|to give off a soft light|shine|-|Two eyes began to ___ in the dark.|light|verb
+quiet|making very little noise|silent|loud|The house was ___ and still.|sound|adj
+silent|with no sound at all|quiet|noisy|It was so ___ that I could hear my heart.|sound|adj
+loud|making a lot of noise|noisy|quiet|A ___ bang made me jump.|sound|adj
+creaky|making a long, squeaky sound|squeaky|silent|The ___ door opened by itself.|sound|adj
+whisper|to speak very softly|murmur|shout|The ghost leaned close and began to ___ in my ear.|sound|verb
+knock|to hit a door to be let in|tap|-|Someone began to ___ on the door with their fist.|sound|verb
+scratch|to scrape with sharp nails|scrape|-|Something began to ___ at the window with long, sharp nails.|sound|verb
+howl|to make a long, sad cry|wail|-|The wind began to ___ like a sad wolf outside.|sound|verb
+scream|to shout in a high voice because you are scared|shriek|-|She began to ___ at the top of her voice.|sound|verb
+hiss|to make a long "sss" sound, like a snake|-|-|The thing began to ___ like an angry snake through the keyhole.|sound|verb
+bang|a sudden, loud noise|crash|-|A ___ came from the attic.|sound|noun
+thump|a dull, heavy sound|bump|-|I heard a ___ on the stairs above.|sound|noun
+echo|a sound that comes back after you shout|-|-|My shout made an ___ in the cellar.|sound|noun
+thunder|the loud rumble in the sky in a storm|-|-|___ shook the whole house.|sound|noun
+storm|wild weather with wind, rain and thunder|-|-|A ___ rattled the windows all night.|mood|noun
+cold|not warm|chilly|hot|The ghost's hand felt ___ as ice.|cold|adj
+icy|very, very cold, like ice|freezing|warm|An ___ breath touched my neck.|cold|adj
+freezing|so cold that you shake|icy|hot|The cellar was ___ and dark.|cold|adj
+shiver|to shake a little from cold or fear|shake|-|The cold wind made me ___.|cold|verb
+damp|a little bit wet|moist|dry|The cellar walls were ___ and smelled of mould.|decay|adj
+dusty|covered in dust|dirty|clean|The ___ books had not been touched for years.|decay|adj
+dirty|not clean|grubby|clean|The floor was ___ and covered in footprints.|decay|adj
+broken|in pieces or not working|smashed|fixed|A ___ window let in the cold wind.|decay|adj
+cracked|with thin lines where it has split|split|whole|The ___ mirror showed two faces.|decay|adj
+rotten|old and gone bad|-|fresh|The ___ floor was soft and wet.|decay|adj
+cobweb|a thin web made by a spider|-|-|An old ___ hung in the corner.|decay|noun
+pale|very light in colour, like a ghost|white|rosy|The ghost had a ___ face with no colour.|look|adj
+sharp|able to cut|pointy|blunt|The monster had ___ claws.|look|adj
+thin|not fat, with very little flesh|skinny|fat|A ___ hand came through the gap.|look|adj
+tall|very high|-|short|A ___ shadow stood by the door.|size|adj
+huge|very, very big|giant|tiny|A ___ spider hung over the bed.|size|adj
+tiny|very small|little|huge|I saw ___ footprints on the floor.|size|adj
+old|made a long time ago|ancient|new|The ___ house creaked in the wind.|age|adj
+ghost|the spirit of a person who has died|spirit|-|A ___ floated down the hall.|ghost|noun
+spooky|a bit scary, as if ghosts are near|creepy|-|The old house felt ___ at night.|ghost|adj
+creepy|strange and a little scary|spooky|-|A ___ doll sat on the stairs.|ghost|adj
+haunted|visited by ghosts|-|-|People say this house is ___.|ghost|adj
+monster|a big, scary creature|beast|-|A ___ was hiding in the cupboard.|ghost|noun
+vanish|to suddenly disappear|disappear|appear|Blink, and the face will ___.|ghost|verb
+float|to drift in the air|drift|sink|The ghost began to ___ up the stairs.|ghost|verb
+creep|to move slowly and quietly|sneak|stomp|I had to ___ past the sleeping dog.|move|verb
+sneak|to move quietly so no one sees you|creep|-|The cat began to ___ in through the flap.|move|verb
+tiptoe|to walk very quietly on your toes|-|stomp|We had to ___ past the bedroom.|move|verb
+crawl|to move on your hands and knees|-|-|Something began to ___ out of the drain.|move|verb
+hide|to go where no one can see you|-|seek|I ran to ___ under the bed.|move|verb
+run|to go fast on your feet|dash|walk|Quick, ___ as fast as you can to the salt circle!|move|verb
+jump|to push yourself up into the air|leap|-|The loud bang made me ___ right out of my seat.|move|verb
+shake|to move quickly up and down|tremble|-|The ground began to ___ and the pictures fell off the wall.|move|verb
+strange|not normal; a bit odd|odd|normal|A ___ smell came from the cellar.|mood|adj
+sad|unhappy|unhappy|happy|The ghost looked very ___.|mood|adj
+angry|very cross|cross|calm|The ghost was ___ that we were there.|mood|adj
+lonely|sad because you are all alone|-|-|The big, empty house felt ___.|mood|adj
+still|not moving at all|-|moving|Nothing moved. Everything was ___.|mood|adj
+sudden|happening very quickly|-|slow|A ___ noise made us all jump.|mood|adj
+empty|with nothing or no one inside|-|full|The room was ___, but the chair was rocking.|place|adj
 `,
   y67: `
-ominous|giving the feeling that something bad is going to happen|threatening,menacing|promising|An ___ silence settled over the house.|fear
-menacing|suggesting that danger or harm is coming|threatening,intimidating|harmless|A ___ figure loomed behind the frosted glass.|fear
-gruesome|causing horror and disgust|grisly,horrifying|pleasant|The old book in the study told ___ stories.|fear
-dread|great fear about something that may happen|terror,horror||A cold ___ crept over you as the clock struck twelve.|fear
-unnerving|making you lose your courage or feel scared|unsettling,disturbing|reassuring|The portrait's ___ eyes followed you.|fear
-sinister|seeming evil or dangerous|evil,menacing|innocent|A ___ smile spread across the portrait's face.|trait
-malicious|wanting to hurt others|spiteful,cruel|kind|A ___ voice hissed through the vent.|trait
-vengeful|wanting to get revenge|unforgiving,bitter|forgiving|Some say the woman in white is ___.|trait
-vigilant|carefully watching for danger|watchful,alert|careless|Stay ___ — it is never far away.|trait
-reluctant|unwilling and slow to do something|hesitant,unwilling|eager|You were ___ to climb into the attic.|trait
-wary|cautious and suspicious of possible danger|cautious,suspicious|trusting|Be ___ of anything that asks to come in.|trait
-eerie|strange and frightening in a mysterious way|uncanny,unsettling|ordinary|An ___ glow seeped under the attic door.|ghost
-ethereal|extremely light and delicate, as if not of this world|otherworldly,unearthly|earthly|An ___ figure drifted along the landing.|ghost
-spectral|like a ghost|ghostly,phantom||A ___ light flickered in the attic.|ghost
-apparition|a ghost or ghostlike image of a person|ghost,spirit||The ___ vanished when the lights came on.|ghost
-phantom|a ghost; something that seems real but is not|ghost,spirit||___ footsteps paced above your head.|ghost
-tormented|suffering great pain or worry|tortured,troubled|peaceful|The ___ spirit could not rest.|ghost
-restless|unable to stay still or be at peace|unsettled,fidgety|peaceful|The ___ ghost wanders the house every night.|ghost
-foreboding|a strong feeling that something bad will happen|unease,apprehension||You felt a sense of ___ as the lights dimmed.|feeling
-petrified|so frightened that you cannot move|terrified,frozen|calm|___, you stared at the shape in the doorway.|feeling
-apprehensive|worried that something bad may happen|uneasy,anxious|confident|You felt ___ about opening the cellar door.|feeling
-anxious|feeling worried or nervous|uneasy,fretful|relaxed|The ___ children waited for their parents.|feeling
-agitated|nervous, upset and unable to keep still|restless,flustered|calm|The dog grew ___ whenever it was near.|feeling
-bewildered|very confused|baffled,puzzled|enlightened|You were ___ — the door was locked from the inside.|feeling
-desolate|empty, bleak and lonely|bleak,barren|lively|The ___ garden stretched away into the fog.|place
-derelict|abandoned and in very bad condition|abandoned,ruined|occupied|The ___ house next door had no lights.|place
-deserted|empty of people|abandoned,empty|crowded|The street outside was ___.|place
-stifling|so hot or airless that it is hard to breathe|suffocating,airless|fresh|The attic was ___ and dusty.|place
-claustrophobic|uncomfortably closed in and cramped|cramped,confined|spacious|The ___ coal room made it hard to breathe.|place
-dilapidated|old and falling apart from neglect|rundown,crumbling|well-kept|The ___ shed leaned against the fence.|decay
-ramshackle|badly made and falling to pieces|rickety,tumbledown|sturdy|A ___ ladder led up into the attic.|decay
-rickety|likely to break or fall apart|shaky,wobbly|sturdy|The ___ banister creaked under your hand.|decay
-putrid|rotting and smelling disgusting|rotten,foul|fresh|A ___ smell rose from the coal chute.|decay
-rancid|smelling or tasting sour and spoiled|sour,spoiled|fresh|The ___ milk had been left out for days.|decay
-pungent|having a strong, sharp smell|acrid,strong|mild|The ___ smell of smoke drifted from the fireplace.|decay
-ghastly|causing horror; deathly pale|horrible,hideous|pleasant|A ___ face peered down the chimney.|look
-hideous|extremely ugly|repulsive,monstrous|beautiful|A ___ creature pressed its face to the glass.|look
-grotesque|strangely ugly or twisted in shape|distorted,deformed|beautiful|Its ___ fingers curled around the door frame.|look
-translucent|letting some light through, but not clear like glass|see-through,semi-transparent|opaque|Her ___ hand passed straight through the door.|look
-opaque|not letting any light through; impossible to see through|cloudy,solid|transparent|Through the ___ screen door, you could only see a shape.|look
-gaunt|very thin and bony, often from illness|haggard,bony|plump|A ___ face appeared at the bathroom window.|look
-haggard|looking exhausted and unwell|worn,drawn|fresh|The ___ woman in the painting had sleepless eyes.|look
-sinewy|lean and stringy, with tough muscles showing|wiry,stringy|flabby|A long, ___ arm reached down the chimney.|look
-tattered|old and torn|ragged,shredded|pristine|Her ___ white dress dragged along the floor.|look
-gnarled|knobbly and twisted with age|knotted,twisted|smooth|___ fingers scraped down the window.|look
-dismal|gloomy and depressing|dreary,depressing|cheerful|The ___ basement smelled of damp coal.|mood
-bleak|cold, empty and without hope|grim,hopeless|hopeful|The night outside looked ___ and endless.|mood
-sombre|dark, serious and sad|grave,solemn|cheerful|The family in the portrait wore ___ black clothes.|mood
-sorrowful|full of sadness|mournful,grieving|joyful|Her ___ cry echoed through the halls.|mood
-forlorn|sad and lonely|wretched,lonely|cheerful|A ___ teddy bear sat in the empty cot.|mood
-murky|dark and dirty, hard to see through|cloudy,muddy|clear|___ water gurgled in the floor drain.|dark
-shrouded|covered or hidden, as if wrapped in cloth|veiled,cloaked|exposed|The furniture was ___ in white sheets.|dark
-silhouette|a dark outline of someone seen against a lighter background|outline,profile||A tall ___ stood outside the screen door.|dark
-engulf|to completely surround or swallow up|swallow,consume||Darkness began to ___ the hallway.|dark
-obscure|to hide something or make it hard to see|conceal,hide|reveal|Long black hair seemed to ___ her face.|dark
-frigid|extremely cold|freezing,icy|scorching|___ air poured from the open hatch.|cold
-numb|unable to feel anything|deadened,unfeeling|sensitive|Your fingers were ___ with cold.|cold
-wail|a long, high cry of pain or grief|howl,lament||A ___ rose from inside the fireplace.|sound
-haunting|sad and beautiful in a way that is hard to forget|mournful,unforgettable|forgettable|A ___ lullaby played from the nursery.|sound
-echoing|repeating as an echo|resounding,reverberating|muffled|___ footsteps followed you down the hall.|sound
-muffled|quiet and unclear because something covers it|muted,stifled|clear|A ___ voice called from inside the wall.|sound
-piercing|very loud and high, almost hurting your ears|shrill,ear-splitting|soft|A ___ scream came from the attic.|sound
-rasping|harsh and scraping|grating,hoarse|smooth|A ___ breath came through the letterbox.|sound
-lurking|hiding and waiting, often ready to attack|skulking,prowling||Something was ___ beneath the floorboards.|move
-frantic|wild with fear or worry|panicked,desperate|calm|___ knocking shook the back door.|move
-clamber|to climb awkwardly using hands and feet|scramble,climb||You ___ up the steep attic stairs.|move
-stagger|to walk unsteadily, as if about to fall|totter,reel|stride|You ___ backwards as the glass cracked.|move
-lurch|to make a sudden, unsteady movement|jerk,sway||The figure began to ___ towards the window.|move
-cower|to crouch down in fear|cringe,shrink||Don't ___ — face it and speak the words!|move
-looming|appearing large and threatening|towering,hovering||A ___ shape filled the attic window.|size
-intruder|someone who enters a place without permission|trespasser,invader|guest|Keep the ___ out at all costs!|threat
-barricade|to block something to keep people out|blockade,fortify|unblock|___ the door with planks!|threat
-nocturnal|active at night|night-time,nightly|diurnal|The ___ visitor only comes after dark.|threat
-treacherous|dangerous and not to be trusted|perilous,unsafe|safe|The ___ stairs were missing three steps.|threat
-banish|to send away and forbid from coming back|expel,exile|welcome|Speak the right word to ___ the spirit.|threat
+dreadful|very bad or frightening|terrible|lovely|A ___ scream came from the attic.|fear|adj
+terrified|so scared you can hardly move|petrified|calm|She was ___ when the handle turned.|feel|adj
+uneasy|worried and not relaxed|anxious|calm|I felt ___ in the quiet house.|feel|adj
+trapped|not able to get away|stuck|free|We felt ___ inside the locked house.|feel|adj
+tense|nervous and waiting for something to happen|-|relaxed|The air felt ___ just before the knock.|mood|adj
+curious|wanting to find out about something|nosy|bored|The ___ girl opened the cellar door.|trait|adj
+cautious|being careful to avoid danger|careful|careless|Be ___ on the creaky stairs.|trait|adj
+wicked|very bad or evil|evil|good|A ___ laugh drifted down the chimney.|trait|adj
+sneaky|doing things secretly|sly|honest|The ___ shadow slipped behind the curtain.|trait|adj
+ghostly|pale and see-through, like a ghost|phantom|solid|A ___ figure floated past the window.|ghost|adj
+eerie|strange and a little frightening|spooky|ordinary|An ___ glow came from under the door.|ghost|adj
+creature|a living thing, often strange or scary|beast|-|A ___ was moving in the dark.|ghost|noun
+fade|to slowly become less clear|-|appear|The face began to ___ away.|ghost|verb
+gloomy|dark and sad-looking|dim|bright|The attic was ___ and full of shadows.|dark|adj
+shadowy|full of shadows|dark|sunny|Something moved in the ___ corner.|dark|adj
+pitch-black|completely dark|very dark|bright|The cellar was ___ when the torch went out.|dark|adj
+foggy|full of thick mist|misty|clear|The garden was ___ and grey.|dark|adj
+lurk|to wait, hidden and ready to jump out|hide|-|Something likes to ___ under the stairs.|move|verb
+tremble|to shake because you are scared|shiver|-|My hands began to ___.|move|verb
+scurry|to run with quick, little steps|scamper|dawdle|Mice ___ away from the light.|move|verb
+stumble|to trip or nearly fall over|trip|-|I began to ___ and nearly fell down the dark stairs.|move|verb
+slither|to slide along like a snake|slide|-|Something began to ___ across the floor like a snake.|move|verb
+drift|to float slowly|float|-|The mist began to ___ slowly through the hall.|move|verb
+rattle|to shake and knock noisily|clatter|-|The window began to ___ in its frame.|sound|verb
+shriek|a sudden, high scream|screech|whisper|A ___ echoed through the house.|sound|noun
+moan|a low sound of pain or sadness|groan|laugh|A low ___ came from the chimney.|sound|noun
+murmur|a soft, low sound of people talking|whisper|-|A ___ of voices came from the wall.|sound|noun
+hush|a sudden, deep quiet|-|noise|A ___ fell over the house.|sound|noun
+faint|very quiet or hard to see|weak|clear|I heard a ___ whisper.|sound|adj
+muffled|quiet because something is covering it|-|clear|A ___ cry came from behind the wall.|sound|adj
+chilly|cold enough to make you shiver|cool|warm|The hall grew ___ as it came near.|cold|adj
+frosty|covered in white frost; very cold|icy|hot|___ fingerprints appeared on the glass.|cold|adj
+clammy|cold, damp and sticky|damp|dry|A ___ hand touched mine in the dark.|cold|adj
+mouldy|covered in fuzzy growth caused by damp|-|fresh|A ___ smell came from the drain.|decay|adj
+slimy|wet and slippery|slippery|dry|A ___ trail led away from the drain.|decay|adj
+crumbling|falling apart in little pieces|-|-|The ___ walls turned to dust.|decay|adj
+rusty|covered in orange-brown rust|-|shiny|The ___ gate creaked open.|decay|adj
+faded|lost its colour or brightness|-|bright|The ___ photo showed three children.|decay|adj
+abandoned|left empty and not looked after|deserted|cared-for|An ___ doll sat on the stairs.|place|adj
+tattered|old and torn|ragged|new|Her ___ dress dragged along the floor.|look|adj
+crooked|bent or not straight|twisted|straight|The ___ picture hung from one nail.|look|adj
+hollow|empty inside|-|solid|The ghost had ___ eyes.|look|adj
+bony|so thin you can see the bones|skinny|plump|A ___ hand came through the gap.|look|adj
+jagged|sharp and uneven|spiky|smooth|___ glass stuck out of the frame.|look|adj
+tangled|twisted together in a mess|knotted|neat|Her ___ black hair hung over her face.|look|adj
+glimpse|a very quick look|-|-|I caught a ___ of a face at the window.|look|noun
+stare|to look at something for a long time|gaze|-|The portrait seemed to ___ at me.|look|verb
+peer|to look closely at something hard to see|-|-|I had to ___ into the dark.|look|verb
+weird|very strange|odd|normal|There was a ___ scratching in the walls.|mood|adj
+stormy|with strong wind, rain and thunder|wild|calm|It was a ___ night with no stars.|mood|adj
+grim|serious and unpleasant|-|cheerful|The man in the painting had a ___ face.|mood|adj
+peaceful|calm and quiet|-|troubled|The garden looked ___, until the shadow moved.|mood|adj
+mysterious|strange and hard to explain|puzzling|ordinary|A ___ light glowed in the attic.|mood|adj
+gigantic|extremely big|enormous|tiny|A ___ shadow filled the doorway.|size|adj
+narrow|thin, not wide|slim|wide|The ___ stairs led up to the attic.|size|adj
+ancient|very, very old|old|modern|An ___ clock ticked in the hall.|age|adj
+gasp|a sudden breath in because you are shocked|-|-|She gave a loud ___ and dropped the torch.|sound|noun
+rumble|a low, deep sound like thunder|-|-|A low ___ shook the floor.|sound|noun
+stalk|to follow quietly and slowly, like a hunter|hunt|-|Something seemed to ___ me down the hall.|move|verb
+swirl|to move round and round|twirl|-|Cold mist began to ___ around my feet.|move|verb
+shimmer|to shine with a soft, shaky light|glimmer|-|The ghost seemed to ___ in the moonlight.|light|verb
+glisten|to shine because it is wet|sparkle|-|The wet floor began to ___ in the torchlight.|light|verb
+motionless|not moving at all|frozen|moving|The ghost stood ___ at the end of the hall.|mood|adj
+gloom|a dark, sad feeling in a place|-|-|A heavy ___ filled the empty room.|mood|noun
+dusk|the time just as it gets dark|twilight|dawn|We reached the old house at ___.|dark|noun
 `,
   y910: `
-macabre|disturbing because it involves death or horror|grisly,gruesome|cheerful|The study held a ___ collection of mourning photographs.|fear
-baleful|threatening harm; menacing|menacing,sinister|friendly|She fixed you with a ___ stare.|fear
-portentous|warning that something momentous or bad will happen|ominous,foreboding|reassuring|The ___ knocking came exactly three times.|fear
-harrowing|extremely distressing|traumatic,agonising|comforting|It was a ___ night that none of you will ever forget.|fear
-ghoulish|delighting in death and gruesome things|macabre,morbid|wholesome|A ___ grin was carved into the banister.|fear
-abhorrent|causing hatred or disgust|repugnant,detestable|admirable|The thing at the window was ___ to behold.|fear
-malevolent|wishing to do evil to others|malicious,wicked|benevolent|A ___ presence pressed against every window.|trait
-insidious|harmful in a slow, hidden way|stealthy,sly|harmless|The cold spread with ___ patience through the house.|trait
-morbid|having an unhealthy interest in death and disturbing things|grim,ghoulish|wholesome|The previous owner had a ___ fascination with funerals.|trait
-nefarious|wicked and criminal|villainous,evil|honourable|Whatever it wants, its intentions are ___.|trait
-malignant|evil in nature and harmful|harmful,hostile|benign|Something ___ had settled into the walls of the house.|trait
-sordid|dirty and unpleasant, or morally shameful|squalid,seedy|respectable|The diary revealed the ___ history of the house.|trait
-enigmatic|mysterious and hard to understand|cryptic,puzzling|straightforward|The notes left behind were ___.|trait
-clandestine|kept secret, often because it is forbidden|secret,covert|open|The diaries describe ___ rituals in the cellar.|trait
-sepulchral|gloomy and dismal, like a tomb|funereal,tomblike|cheerful|A ___ voice rose from the cellar.|mood
-lugubrious|looking or sounding sad and dismal|mournful,doleful|cheerful|The grandfather clock struck with a ___ chime.|mood
-oppressive|heavy and overwhelming; hard to bear|suffocating,overbearing|uplifting|An ___ silence filled the attic.|mood
-melancholy|a deep, lasting sadness|sorrow,gloom|joy|A heavy ___ hung over the nursery.|mood
-desolation|a state of complete emptiness or great sadness|bleakness,despair|joy|___ spread through the empty rooms.|mood
-uncanny|strange in an unsettling, almost supernatural way|eerie,weird|ordinary|The ___ likeness between you and the portrait was unsettling.|ghost
-incorporeal|having no physical body|bodiless,immaterial|physical|An ___ figure drifted straight through the wall.|ghost
-preternatural|beyond what is normal or natural|supernatural,abnormal|ordinary|She moved with ___ speed.|ghost
-revenant|a person who has returned, especially from the dead|ghost,returner||The ___ had come back for the house it once owned.|ghost
-spectre|a ghost, or a threat that haunts you|phantom,wraith||The ___ of the woman in white haunts the lane.|ghost
-wraith|a ghost or ghostlike image, often thin and pale|spectre,phantom||A ___ in white glided past the landing.|ghost
-eldritch|weird, unnatural and frightening|unearthly,otherworldly|natural|An ___ shriek split the night.|ghost
-invocation|calling on a spirit or power, often with words|incantation,summoning||Each correct word is an ___ that drives it back.|ghost
-desecrated|treated with violent disrespect (a sacred place)|defiled,violated|consecrated|The salt circle had been ___ by muddy footprints.|ghost
-liminal|relating to a threshold or an in-between state|transitional,in-between||The doorway is a ___ space — neither in nor out.|place
-labyrinthine|like a maze; complicated and confusing|maze-like,winding|straightforward|The ___ cellar corridors twisted into darkness.|place
-threshold|the strip at the bottom of a doorway; a point of entering|doorway,entrance||It cannot cross the ___ without an invitation.|place
-cadaverous|very pale, thin and bony, like a corpse|gaunt,deathly|healthy|Her ___ fingers wrapped around the window frame.|look
-emaciated|abnormally thin from starvation or illness|skeletal,wasted|well-fed|An ___ arm slid through the cat flap.|look
-pallid|unhealthily pale|wan,ashen|flushed|A ___ face hovered behind the frosted glass.|look
-wan|pale and looking ill or tired|pallid,sickly|rosy|A ___ moon gave almost no light.|look
-sallow|having an unhealthy yellowish skin colour|sickly,pasty|ruddy|A ___ face watched from the bathroom window.|look
-inscrutable|impossible to understand or interpret|mysterious,unreadable|obvious|The portrait wore an ___ expression.|look
-dishevelled|untidy and messy in appearance|unkempt,bedraggled|neat|Her ___ black hair hid her face entirely.|look
-gossamer|very light, thin and delicate|filmy,wispy|coarse|Her ___ dress fluttered without any wind.|look
-phantasmagorical|dreamlike, with strange, shifting images|surreal,dreamlike|realistic|Shadows danced in ___ shapes across the wall.|look
-palpable|so intense it can almost be touched|tangible,perceptible|imperceptible|The fear in the room was ___.|feeling
-visceral|felt deep in the body rather than reasoned|instinctive,raw|rational|You felt a ___ terror as the handle turned.|feeling
-trepidation|fear or worry about what might happen|apprehension,dread|confidence|With ___, you lifted the attic hatch.|feeling
-premonition|a strong feeling that something is about to happen|hunch,omen||You had a ___ that the back door was next.|feeling
-bereft|deprived of something; lonely and grieving|forlorn,deprived|blessed|___ of their parents, the children waited alone.|feeling
-tremulous|shaking slightly, usually from nervousness|quivering,shaky|steady|You read the words in a ___ voice.|feeling
-tenebrous|dark and shadowy|shadowy,murky|luminous|The ___ hallway swallowed the torchlight.|dark
-stygian|extremely dark, gloomy and hellish|pitch-black,infernal|radiant|A ___ darkness rose from the cellar.|dark
-impenetrable|impossible to get through or see through|impassable,dense|accessible|An ___ fog surrounded the house.|dark
-cacophony|a harsh mixture of loud, unpleasant sounds|din,racket|harmony|A ___ of knocking erupted from every door.|sound
-susurration|a soft whispering or rustling sound|whispering,murmur||A ___ of voices drifted from the vents.|sound
-miasma|an unpleasant, unhealthy smell or atmosphere|stench,fug||A ___ of decay drifted up from the drain.|decay
-fetid|smelling extremely unpleasant|putrid,rank|fragrant|___ water pooled beneath the coal chute.|decay
-viscous|thick and sticky, not flowing easily|gooey,syrupy|runny|A ___ black liquid oozed from the vent.|decay
-decrepit|worn out and ruined by age or neglect|dilapidated,crumbling|pristine|A ___ rocking chair rocked by itself.|decay
-vile|extremely unpleasant or wicked|foul,repugnant|lovely|A ___ odour drifted from the chimney.|decay
-cloying|unpleasantly sweet or excessive|sickly,syrupy|refreshing|The ___ scent of lilies filled the hall.|decay
-moribund|close to death; no longer active|dying,declining|thriving|The ___ garden had not bloomed in years.|decay
-vestige|a last trace of something that has disappeared|remnant,trace||A ___ of old perfume lingered in the nursery.|decay
-gelid|icy; extremely cold|frozen,icy|scalding|A ___ draught crept under the cellar door.|cold
-pervasive|spreading through every part of something|widespread,permeating|contained|A ___ chill filled every room.|cold
-furtive|done secretly in a nervous or guilty way|stealthy,secretive|open|You noticed a ___ movement behind the curtains.|move
-surreptitious|done secretly so that others will not notice|covert,sneaky|blatant|A ___ hand slid the bolt back.|move
-writhe|to twist and squirm, as if in pain|squirm,thrash||Her fingers began to ___ through the gap.|move
-recoil|to spring back suddenly in fear or disgust|flinch,shrink||The entity will ___ when it hears the right word.|move
-beckon|to signal to someone to come closer|summon,gesture||A pale hand began to ___ from the garden.|move
-skulk|to hide or move about secretly, with bad intent|lurk,prowl||Something likes to ___ in the boiler room.|move
-sinuous|having many curves; moving with smooth twists|serpentine,winding|straight|Her ___ arms bent in impossible ways.|move
-inexorable|impossible to stop or prevent|unstoppable,unavoidable|avoidable|Its ___ advance continued, room by room.|threat
-relentless|never stopping or easing|unrelenting,persistent|half-hearted|The ___ scratching went on all night.|threat
-implacable|unable to be calmed or stopped|unstoppable,merciless|forgiving|The ___ spirit would not rest until it was inside.|threat
-pernicious|having a harmful effect, especially gradually|destructive,damaging|beneficial|The damp had a ___ effect on the old timbers.|threat
-perilous|full of danger|dangerous,hazardous|safe|The ___ attic floor creaked with every step.|threat
-interloper|a person who goes where they are not wanted|intruder,trespasser||The ___ tested every lock in the house.|threat
-exorcise|to drive out an evil spirit|banish,expel|summon|You must ___ the spirit from every entrance.|threat
+ominous|giving a feeling that something bad will happen|threatening|promising|An ___ silence settled over the house.|fear|adj
+menacing|looking dangerous, as if it might hurt you|threatening|harmless|A ___ shape stood behind the frosted glass.|fear|adj
+gruesome|very horrible and shocking|grisly|pleasant|The old book told ___ stories.|fear|adj
+unnerving|scary in a quiet way that makes you lose your nerve|unsettling|reassuring|The portrait's eyes were ___.|fear|adj
+dread|great fear of something that might happen|terror|-|A cold ___ crept over me.|fear|noun
+foreboding|a feeling that something bad is coming|dread|-|I felt a sense of ___ as the lights dimmed.|fear|noun
+sinister|seeming evil or dangerous|evil|innocent|A ___ smile spread across the portrait.|trait|adj
+malicious|wanting to hurt other people|spiteful|kind|A ___ voice hissed through the vent.|trait|adj
+vengeful|wanting revenge|bitter|forgiving|Some say the woman in white is ___.|trait|adj
+vigilant|watching carefully for danger|alert|careless|Stay ___, because it is never far away.|trait|adj
+reluctant|not wanting to do something|unwilling|eager|I was ___ to climb into the attic.|trait|adj
+wary|careful because you think there might be danger|cautious|trusting|Be ___ of anything that asks to come in.|trait|adj
+spectral|like a ghost|ghostly|-|A ___ light flickered in the attic.|ghost|adj
+apparition|a ghost or ghost-like figure|ghost|-|The ___ vanished when the lights came on.|ghost|noun
+restless|not able to stay still or be at peace|uneasy|peaceful|The ___ ghost wanders the house every night.|ghost|adj
+haunting|sad, beautiful and hard to forget|-|forgettable|A ___ lullaby played from the nursery.|sound|adj
+petrified|so scared that you cannot move|terrified|calm|___, I stared at the doorway.|feel|adj
+apprehensive|worried about what might happen|nervous|confident|I felt ___ about the cellar door.|feel|adj
+bewildered|very confused|puzzled|certain|I was ___ because the door was locked from the inside.|feel|adj
+isolated|far away from everyone else|cut off|crowded|The house felt ___ and cut off from the world.|place|adj
+desolate|empty, bleak and lonely|bleak|lively|The ___ garden stretched into the fog.|place|adj
+derelict|empty and falling to pieces|abandoned|well-kept|The ___ house next door had no lights.|place|adj
+stifling|so hot and airless that it is hard to breathe|stuffy|fresh|The attic was ___ and dusty.|place|adj
+claustrophobic|uncomfortably small and closed in|cramped|spacious|The ___ coal room made it hard to breathe.|place|adj
+dilapidated|old and falling apart|crumbling|well-kept|A ___ shed leaned against the fence.|decay|adj
+rickety|shaky and likely to break|wobbly|sturdy|The ___ banister creaked under my hand.|decay|adj
+putrid|rotting and smelling horrible|rotten|fresh|A ___ smell rose from the drain.|decay|adj
+pungent|having a very strong smell|strong|mild|The ___ smell of smoke drifted down the chimney.|decay|adj
+musty|smelling old and damp|stale|fresh|The ___ attic smelled of old books.|decay|adj
+ghastly|horrible and deathly pale|horrible|pleasant|A ___ face peered down the chimney.|look|adj
+hideous|very ugly and horrible|repulsive|beautiful|A ___ creature pressed against the glass.|look|adj
+grotesque|ugly in a strange, twisted way|twisted|beautiful|Its ___ fingers curled round the frame.|look|adj
+gaunt|very thin and bony|haggard|plump|A ___ face appeared at the bathroom window.|look|adj
+translucent|letting light through, but not clear like glass|see-through|opaque|Her ___ hand passed through the door.|look|adj
+opaque|not letting any light through|cloudy|transparent|Through the ___ screen door I could only see a shape.|look|adj
+silhouette|a dark outline seen against the light|outline|-|A tall ___ stood outside the screen door.|dark|noun
+shrouded|covered up, hiding what is underneath|veiled|exposed|The furniture was ___ in white sheets.|dark|adj
+murky|dark and hard to see through|cloudy|clear|___ water gurgled in the drain.|dark|adj
+engulf|to cover or swallow up completely|swallow|-|Darkness began to ___ the hall.|dark|verb
+obscure|to hide something from view|conceal|reveal|Long black hair seemed to ___ her face.|dark|verb
+dismal|gloomy and depressing|dreary|cheerful|The ___ basement smelled of damp.|mood|adj
+bleak|cold, empty and without hope|grim|hopeful|The night looked ___ and endless.|mood|adj
+sombre|dark, serious and sad|solemn|cheerful|The family in the portrait wore ___ clothes.|mood|adj
+forlorn|sad and lonely|-|cheerful|A ___ teddy bear sat in the cot.|mood|adj
+oppressive|heavy and hard to bear|overwhelming|uplifting|An ___ silence filled the attic.|mood|adj
+melancholy|deep, lasting sadness|sorrow|joy|A heavy ___ hung over the nursery.|mood|noun
+sorrowful|full of sadness|mournful|joyful|Her ___ cry echoed through the halls.|mood|adj
+frigid|extremely cold|freezing|scorching|___ air poured out of the hatch.|cold|adj
+numb|not able to feel anything|-|sensitive|My fingers were ___ with cold.|cold|adj
+wail|a long, high cry of sadness|howl|-|A ___ rose from the fireplace.|sound|noun
+piercing|so high and loud it hurts your ears|shrill|soft|A ___ scream came from the attic.|sound|adj
+rasping|rough and scratchy|harsh|smooth|A ___ breath came through the letterbox.|sound|adj
+cower|to crouch down in fear|cringe|-|Do not ___; face it and speak the words!|move|verb
+stagger|to walk unsteadily|stumble|stride|I began to ___ back from the window.|move|verb
+lurch|to make a sudden, unsteady move|jerk|-|The figure began to ___ towards the window.|move|verb
+writhe|to twist and squirm|squirm|-|Her fingers began to ___ through the gap.|move|verb
+beckon|to signal for someone to come closer|summon|-|A pale hand began to ___ from the garden.|move|verb
+frantic|wild with fear or worry|panicked|calm|___ knocking shook the back door.|move|adj
+looming|appearing large and threatening|towering|-|A ___ shape filled the window.|size|adj
+intruder|someone who enters without permission|trespasser|guest|Keep the ___ out at all costs!|threat|noun
+barricade|to block something to keep people out|block|unblock|___ the door with planks!|threat|verb
+nocturnal|active at night|-|-|The ___ visitor only comes after dark.|threat|adj
+treacherous|dangerous and not to be trusted|perilous|safe|The ___ stairs were missing three steps.|threat|adj
+relentless|never stopping|persistent|-|The ___ scratching went on all night.|threat|adj
+banish|to send away and forbid to come back|expel|welcome|Speak the right word to ___ the spirit.|threat|verb
 `,
 };
 
 export const LEVEL_NAMES = { y34: 'Year 3/4', y67: 'Year 6/7', y910: 'Year 9/10' };
 
+const none = (s) => (!s || s === '-' ? '' : s);
 function parse(raw) {
   return raw.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
-    const [word, def, syn, ant, sent, cat] = l.split('|').map((s) => (s || '').trim());
-    return { word, def, syn: syn ? syn.split(',').map((s) => s.trim()).filter(Boolean) : [], ant, sent, cat };
+    const [word, def, syn, ant, sent, cat, pos] = l.split('|').map((s) => (s || '').trim());
+    return { word, def, syn: none(syn) ? syn.split(',').map((s) => s.trim()).filter(Boolean) : [], ant: none(ant), sent, cat, pos };
   });
 }
 export const WORDS = Object.fromEntries(Object.entries(RAW).map(([k, v]) => [k, parse(v)]));
@@ -252,11 +233,16 @@ function shuffle(a) {
 }
 function sample(a, n) { return shuffle([...a]).slice(0, n); }
 
-function distractorPool(list, w) {
-  return list.filter((o) => o.cat !== w.cat && o.word !== w.word && !w.syn.includes(o.word) && !o.syn.includes(w.word) && o.word !== w.ant);
+// Wrong answers: a different meaning group. Same part of speech is preferred so grammar never
+// gives the answer away; other types only top up if there are too few.
+function distractors(list, w, n, get, exclude = []) {
+  const pool = list.filter((o) => o.cat !== w.cat && o.word !== w.word && !w.syn.includes(o.word) && !o.syn.includes(w.word) && o.word !== w.ant && !exclude.includes(o.word));
+  const same = sample(pool.filter((o) => o.pos === w.pos), n);
+  const rest = sample(pool.filter((o) => o.pos !== w.pos), n - same.length);
+  return [...same, ...rest].map(get);
 }
 
-// Entrance-specific flavour lines shown above the question
+// Flavour lines shown above the question
 const FLAVOUR = [
   'It hisses through the gap. Speak the word to drive it back!',
   'Pale fingers scrape closer. Answer clearly!',
@@ -266,6 +252,16 @@ const FLAVOUR = [
   'Its hair slides through the crack. Banish it!',
   'It is listening. Choose the right word.',
 ];
+
+const SCENE_PROMPTS = ['Which word fits this spooky scene?', 'Pick the best word for the scene:', 'Which word makes the story scarier?'];
+
+// How often each question style comes up. Sentences (using a word to set the mood) come up most;
+// the youngest level skips synonyms.
+const MIX = {
+  y34: { sentence: 40, def2word: 35, word2def: 15, synonym: 0, antonym: 10 },
+  y67: { sentence: 38, def2word: 28, word2def: 14, synonym: 12, antonym: 8 },
+  y910: { sentence: 36, def2word: 28, word2def: 14, synonym: 14, antonym: 8 },
+};
 
 export function getWordInfo(level, word) {
   return (WORDS[level] || []).find((w) => w.word === word);
@@ -277,49 +273,45 @@ export function makeQuestion(level, recent = []) {
   let candidates = list.filter((w) => !recent.includes(w.word));
   if (candidates.length < 8) candidates = list;
   const w = pick(candidates);
-  const pool = distractorPool(list, w);
 
-  const types = [['def2word', 30], ['word2def', 25], ['sentence', 25], ['synonym', 13]];
-  if (w.ant) types.push(['antonym', 10]);
+  const mix = MIX[level] || MIX.y34;
+  const types = Object.entries(mix).filter(([t, wt]) => wt > 0 && !(t === 'synonym' && !w.syn.length) && !(t === 'antonym' && !w.ant));
   let r = Math.random() * types.reduce((s, t) => s + t[1], 0);
   let type = types[0][0];
   for (const [t, wt] of types) { if ((r -= wt) <= 0) { type = t; break; } }
-  if (type === 'synonym' && !w.syn.length) type = 'def2word';
 
   let prompt, focus = '', sub = '', correct, others;
   switch (type) {
     case 'def2word':
       prompt = 'Which word means:'; sub = `“${w.def}”`;
-      correct = w.word; others = sample(pool, 3).map((o) => o.word);
+      correct = w.word; others = distractors(list, w, 3, (o) => o.word);
       break;
     case 'word2def':
       prompt = 'What does this word mean?'; focus = w.word;
-      correct = w.def; others = sample(pool, 3).map((o) => o.def);
+      correct = w.def; others = distractors(list, w, 3, (o) => o.def);
       break;
     case 'sentence':
-      prompt = 'Complete the banishing words:'; sub = w.sent;
-      correct = w.word; others = sample(pool, 3).map((o) => o.word);
+      prompt = pick(SCENE_PROMPTS); sub = w.sent;
+      correct = w.word; others = distractors(list, w, 3, (o) => o.word);
       break;
     case 'synonym':
-      prompt = 'Which word has a SIMILAR meaning to:'; focus = w.word;
+      prompt = 'Which word means almost the same as:'; focus = w.word;
       correct = pick(w.syn);
-      others = sample(pool.filter((o) => o.word !== correct), 3).map((o) => o.word);
+      others = distractors(list, w, 3, (o) => o.word, [correct]);
       break;
     case 'antonym': {
-      prompt = 'Which word means the OPPOSITE of:'; focus = w.word;
+      prompt = 'Which word means the opposite of:'; focus = w.word;
       correct = w.ant;
       const o2 = [];
       if (w.syn.length) o2.push(pick(w.syn));
-      for (const o of sample(pool.filter((o) => o.word !== correct && !o2.includes(o.word)), 3)) {
-        if (o2.length < 3) o2.push(o.word);
-      }
+      for (const x of distractors(list, w, 3, (o) => o.word, [correct, ...o2])) { if (o2.length < 3) o2.push(x); }
       others = o2;
       break;
     }
   }
   const options = [...new Set([correct, ...others])];
   while (options.length < 4) {
-    const extra = pick(pool);
+    const extra = pick(list.filter((o) => o.word !== w.word && o.cat !== w.cat));
     const v = type === 'word2def' ? extra.def : extra.word;
     if (!options.includes(v)) options.push(v);
   }
