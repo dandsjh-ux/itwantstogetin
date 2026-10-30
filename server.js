@@ -80,6 +80,20 @@ function sanitizeName(n) {
 function publicPlayers(room) {
   return [...room.players.values()].map((p) => ({ id: p.id, name: p.name, color: p.color, ci: p.ci, host: p.id === room.hostId }));
 }
+function allReady(room) {
+  const on = [...room.players.values()].filter((p) => !p.offline);
+  return on.length > 0 && on.every((p) => p.ready);
+}
+
+// What the main menu shows: every house that still has someone in it
+function roomList() {
+  return [...rooms.values()].map((r) => ({
+    code: r.code, host: r.players.get(r.hostId)?.name || '?', phase: r.phase, n: r.players.size, max: MAX_PLAYERS,
+    online: [...r.players.values()].filter((p) => !p.offline).length, level: LEVEL_NAMES[r.settings.level],
+    offline: [...r.players.values()].filter((p) => p.offline).map((p) => p.name),
+  }));
+}
+
 function lobbyState(room) {
   return { code: room.code, hostId: room.hostId, phase: room.phase, players: publicPlayers(room), settings: room.settings, minPlayers: MIN_PLAYERS, levels: LEVEL_NAMES };
 }
@@ -91,10 +105,10 @@ function freeColor(room) {
   return 0;
 }
 
-function newPlayer(socket, name, room) {
+function newPlayer(socket, name, room, token) {
   const ci = freeColor(room);
   return {
-    id: socket.id, name: sanitizeName(name), ci, color: PLAYER_COLORS[ci].hex,
+    id: socket.id, sock: socket.id, token: String(token || '').slice(0, 40), offline: false, offlineAt: 0, name: sanitizeName(name), ci, color: PLAYER_COLORS[ci].hex,
     x: 0, y: 0, z: 0, yaw: 0, f: 1, torch: true, ready: false,
     inv: { salt: 0, plank: 0, charm: 0 }, speedUntil: 0, compassUntil: 0, caughtUntil: 0,
     quiz: null, stats: { banished: 0, correct: 0, wrong: 0, caught: 0 }, missed: [], mastered: [],
@@ -147,7 +161,7 @@ function endGame(room, win, reason) {
   const words = (list) => list.map((w) => getWordInfo(room.settings.level, w)).filter(Boolean).map((w) => ({ word: w.word, def: w.def }));
   const missedAll = new Map();
   for (const p of room.players.values()) for (const w of p.missed) missedAll.set(w, (missedAll.get(w) || 0) + 1);
-  io.to(room.code).emit('gameOver', {
+  io.to(room.code).emit('gameOver', room.lastOver = {
     win, reason, banished: g.banished, target: room.settings.target, elapsed: Math.round(g.elapsed),
     breaches: g.totalBreaches,
     players: [...room.players.values()].map((p) => ({ id: p.id, name: p.name, color: p.color, stats: p.stats, missed: words([...new Set(p.missed)]), mastered: words([...new Set(p.mastered)]) })),
@@ -172,7 +186,7 @@ function maxConcurrent(room) {
 function startAttack(room) {
   const g = room.game;
   const active = new Set([...g.attacks.values()].map((a) => a.e));
-  const players = [...room.players.values()];
+  const players = [...room.players.values()].filter((p) => !p.offline);
   const now = g.elapsed;
   const options = ENTRANCES.filter((e) => !active.has(e.id) && !(g.cooldowns[e.id] > now));
   if (!options.length) return;
@@ -201,7 +215,7 @@ function triggerBreach(room, a) {
   const g = room.game;
   const e = ENTRANCES.find((x) => x.id === a.e);
   g.attacks.delete(a.id);
-  for (const p of room.players.values()) if (p.quiz && p.quiz.attackId === a.id) { p.quiz = null; io.to(p.id).emit('quizClosed', { reason: 'breach' }); }
+  for (const p of room.players.values()) if (p.quiz && p.quiz.attackId === a.id) { p.quiz = null; io.to(p.sock).emit('quizClosed', { reason: 'breach' }); }
   g.planks.delete(e.id);
   g.cooldowns[e.id] = g.elapsed + 25;
   g.wards -= 1;
@@ -219,7 +233,7 @@ function triggerBreach(room, a) {
     target: null, safeTime: 0, caught: new Set(), spawnDelay: 1.5,
   };
   // Release anyone mid-quiz — attacks freeze during a breach
-  for (const p of room.players.values()) if (p.quiz) { p.quiz = null; io.to(p.id).emit('quizClosed', { reason: 'breach' }); }
+  for (const p of room.players.values()) if (p.quiz) { p.quiz = null; io.to(p.sock).emit('quizClosed', { reason: 'breach' }); }
   for (const at of g.attacks.values()) at.banisher = null;
   io.to(room.code).emit('breach', { e: e.id, wards: g.wards, time: room.settings.breachTime });
 }
@@ -245,7 +259,7 @@ function updateBreach(room, dt) {
   if (b.spawnDelay > 0) { b.spawnDelay -= dt; return; }
   const now = Date.now();
   const players = [...room.players.values()];
-  const active = players.filter((p) => p.caughtUntil < now);
+  const active = players.filter((p) => p.caughtUntil < now && !p.offline);
   const exposed = active.filter((p) => !isProtected(room, p));
 
   if (!exposed.length) b.safeTime += dt; else b.safeTime = 0;
@@ -368,7 +382,7 @@ function tick(room) {
     c: g.circles.map((c) => ({ id: c.id, x: c.x, z: c.z, f: c.f, r: c.r, l: Math.ceil(c.until - g.elapsed) })),
     pk: [...g.planks], mb: g.musicBox,
     p: [...room.players.values()].map((p) => ({
-      id: p.id, x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), yaw: +p.yaw.toFixed(2), f: p.f, tr: p.torch,
+      off: p.offline, id: p.id, x: +p.x.toFixed(2), y: +p.y.toFixed(2), z: +p.z.toFixed(2), yaw: +p.yaw.toFixed(2), f: p.f, tr: p.torch,
       cg: p.caughtUntil > now, inv: p.inv, sp: Math.max(0, Math.ceil((p.speedUntil - now) / 1000)),
       cp: Math.max(0, Math.ceil((p.compassUntil - now) / 1000)), q: !!p.quiz, safe: isProtected(room, p),
     })),
@@ -390,7 +404,7 @@ function sendQuestion(room, p) {
   p.quiz.removed = [];
   const a = g.attacks.get(p.quiz.attackId);
   const e = ENTRANCES.find((x) => x.id === a.e);
-  io.to(p.id).emit('quiz', {
+  io.to(p.sock).emit('quiz', {
     attackId: a.id, entrance: e.name, step: a.progress, required: a.required,
     prompt: q.prompt, focus: q.focus, sub: q.sub, options: q.options, flavour: q.flavour, type: q.type,
   });
@@ -403,35 +417,67 @@ function near(p, e) {
 
 // ---------------------------------------------------------------------------
 io.on('connection', (socket) => {
-  let room = null;
-  const me = () => room && room.players.get(socket.id);
+  let room = null, pid = null;   // pid: my stable player id (the socket id I first joined with)
+  const me = () => room && pid && room.players.get(pid);
 
-  socket.on('createRoom', ({ name } = {}, cb) => {
+  socket.on('listRooms', (_, cb) => cb?.(roomList()));
+
+  socket.on('createRoom', ({ name, token } = {}, cb) => {
     if (room) return cb?.({ error: 'Already in a room' });
     const code = makeCode();
-    room = { code, hostId: socket.id, players: new Map(), phase: 'lobby', settings: { ...DEFAULT_SETTINGS }, game: null };
+    pid = socket.id;
+    room = { code, hostId: pid, players: new Map(), phase: 'lobby', settings: { ...DEFAULT_SETTINGS }, game: null };
     rooms.set(code, room);
-    room.players.set(socket.id, newPlayer(socket, name, room));
+    room.players.set(pid, newPlayer(socket, name, room, token));
     socket.join(code);
     cb?.({ ok: true, code, id: socket.id });
     emitLobby(room);
   });
 
-  socket.on('joinRoom', ({ code, name } = {}, cb) => {
+  socket.on('joinRoom', ({ code, name, token } = {}, cb) => {
     if (room) return cb?.({ error: 'Already in a room' });
     const r = rooms.get(String(code || '').toUpperCase().trim());
     if (!r) return cb?.({ error: 'No house with that code. Check the code on the host screen.' });
-    if (r.phase !== 'lobby') return cb?.({ error: 'That game has already started.' });
+    // someone coming back: same device, or the same name as a player who dropped out
+    const tok = String(token || '').slice(0, 40), nm = sanitizeName(name).toLowerCase();
+    const back = [...r.players.values()].find((p) => tok && p.token === tok)
+      || [...r.players.values()].find((p) => p.offline && p.name.toLowerCase() === nm);
+    if (back) return rejoin(r, back, cb);
+    if (r.phase !== 'lobby') {
+      const gone = [...r.players.values()].filter((p) => p.offline).map((p) => p.name);
+      return cb?.({ error: gone.length ? `That game has already started. If you were playing, rejoin as: ${gone.join(', ')}.` : 'That game has already started.' });
+    }
     if (r.players.size >= MAX_PLAYERS) return cb?.({ error: 'That house is full (6 players).' });
-    room = r;
-    room.players.set(socket.id, newPlayer(socket, name, room));
+    room = r; pid = socket.id;
+    room.players.set(pid, newPlayer(socket, name, room, tok));
     socket.join(room.code);
-    cb?.({ ok: true, code: room.code, id: socket.id });
+    cb?.({ ok: true, code: room.code, id: pid });
     emitLobby(room);
   });
 
+  // Take over a player's seat (their old connection is gone, or just hasn't timed out yet) and bring this
+  // device up to date with whatever phase the house is in.
+  function rejoin(r, p, cb) {
+    const old = io.sockets.sockets.get(p.sock);
+    p.sock = socket.id; p.offline = false; p.offlineAt = 0;
+    if (old && old !== socket) { old.leave(r.code); old.emit('replaced'); }
+    room = r; pid = p.id;
+    socket.join(r.code);
+    if (r.hostId !== p.id && ![...r.players.values()].some((x) => x.id === r.hostId && !x.offline)) r.hostId = p.id;
+    cb?.({ ok: true, code: r.code, id: p.id, rejoin: true, phase: r.phase });
+    if (r.phase === 'lobby') emitLobby(r);
+    else {
+      socket.emit('gameStarting', {
+        rejoin: true, settings: r.settings,
+        players: [...r.players.values()].map((q) => ({ id: q.id, name: q.name, color: q.color, ci: q.ci, x: q.x, y: q.y, z: q.z, f: q.f, yaw: q.yaw })),
+      });
+      if (r.phase === 'playing') socket.emit('gameBegin', {});
+      else if (r.phase === 'ended' && r.lastOver) socket.emit('gameOver', r.lastOver);
+      notify(r, `${p.name} is back.`, 'info');
+    }
+  }
   socket.on('updateSettings', (patch = {}) => {
-    if (!room || room.hostId !== socket.id || room.phase !== 'lobby') return;
+    if (!room || room.hostId !== pid || room.phase !== 'lobby') return;
     const s = room.settings;
     for (const [k, v] of Object.entries(patch)) {
       if (!(k in DEFAULT_SETTINGS)) continue;
@@ -455,7 +501,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('startGame', (_, cb) => {
-    if (!room || room.hostId !== socket.id || room.phase !== 'lobby') return;
+    if (!room || room.hostId !== pid || room.phase !== 'lobby') return;
     if (room.players.size < MIN_PLAYERS) return cb?.({ error: `You need at least ${MIN_PLAYERS} players.` });
     startGame(room);
     cb?.({ ok: true });
@@ -466,7 +512,7 @@ io.on('connection', (socket) => {
     if (!p || room.phase !== 'intro') return;
     p.ready = true;
     io.to(room.code).emit('readyState', [...room.players.values()].map((p) => ({ id: p.id, ready: p.ready })));
-    if ([...room.players.values()].every((p) => p.ready)) beginPlay(room);
+    if (allReady(room)) beginPlay(room);
   });
 
   socket.on('pos', (d) => {
@@ -626,31 +672,51 @@ io.on('connection', (socket) => {
   });
 
   socket.on('backToLobby', () => {
-    if (!room || room.hostId !== socket.id || room.phase !== 'ended') return;
+    if (!room || room.hostId !== pid || room.phase !== 'ended') return;
     room.phase = 'lobby';
-    room.game = null;
+    room.game = null; room.lastOver = null;
+    for (const [id, q] of room.players) if (q.offline) room.players.delete(id);   // anyone still gone is out of the next game
     emitLobby(room);
   });
 
-  socket.on('leaveRoom', () => leave());
-  socket.on('disconnect', () => leave());
+  socket.on('leaveRoom', () => leave(true));
+  socket.on('disconnect', () => leave(false));
 
-  function leave() {
+  // A deliberate leave removes you. A dropped connection during a game just marks you offline, so you can rejoin.
+  function leave(deliberate) {
     if (!room) return;
     const r = room;
+    const p = r.players.get(pid);
     room = null;
     socket.leave(r.code);
-    const p = r.players.get(socket.id);
-    r.players.delete(socket.id);
-    if (r.game && p?.quiz) { const a = r.game.attacks.get(p.quiz.attackId); if (a) a.banisher = null; }
+    if (!p || p.sock !== socket.id) return;   // this seat has already been taken over by a newer connection
+    if (r.game && p.quiz) { const a = r.game.attacks.get(p.quiz.attackId); if (a) a.banisher = null; }
+    p.quiz = null;
+    if (!deliberate && r.phase !== 'lobby') {
+      p.offline = true; p.offlineAt = Date.now();
+      if (r.hostId === p.id) { const next = [...r.players.values()].find((x) => !x.offline); if (next) r.hostId = next.id; }
+      io.to(r.code).emit('notify', { text: `${p.name} lost connection.`, kind: 'warn' });
+      if (r.phase === 'intro' && allReady(r)) beginPlay(r);
+      return;
+    }
+    r.players.delete(p.id);
     if (!r.players.size) { clearTimeout(r.introTimer); rooms.delete(r.code); return; }
-    if (r.hostId === socket.id) r.hostId = r.players.keys().next().value;
+    if (r.hostId === p.id) r.hostId = [...r.players.values()].find((x) => !x.offline)?.id || r.players.keys().next().value;
     if (r.phase === 'lobby') emitLobby(r);
     else {
-      io.to(r.code).emit('playerLeft', { id: socket.id, name: p?.name, hostId: r.hostId });
-      if (r.phase === 'intro' && [...r.players.values()].every((x) => x.ready)) beginPlay(r);
+      io.to(r.code).emit('playerLeft', { id: p.id, name: p.name, hostId: r.hostId });
+      if (r.phase === 'intro' && allReady(r)) beginPlay(r);
     }
   }
 });
+
+// Houses where everyone has been gone for a while are closed
+setInterval(() => {
+  const now = Date.now();
+  for (const r of rooms.values()) {
+    const ps = [...r.players.values()];
+    if (ps.length && ps.every((p) => p.offline && now - p.offlineAt > 5 * 60 * 1000)) { clearTimeout(r.introTimer); rooms.delete(r.code); }
+  }
+}, 30000);
 
 server.listen(PORT, () => console.log(`It Wants To Get In — listening on :${PORT}`));

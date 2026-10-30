@@ -94,6 +94,19 @@ footsteps, running, glass, alert.
 
 No right-clicks are needed. On tablets you get a joystick, a drag-to-look area and big buttons.
 
+### Houses, dropped connections and rejoining
+The main menu lists every house that's open, with its host, level and who's in it; tap **Join** on one that's
+waiting. If your connection drops (a tablet going to sleep, Wi-Fi blinking) the game stays on screen and
+takes your seat back automatically when you're reconnected. Even after closing or reloading the page, the
+menu offers **Rejoin** for the house you were in, and in-progress houses list the names of players who
+dropped out. You come back where you stood. While you're gone you can't be hunted, you don't hold up the
+start, and the host passes to someone else if it was you. Houses where everyone has been gone for 5 minutes
+close. New players can't join a game that has already started.
+
+If a device never gets the "begin" message after the host starts (slow tablet, missed message), it now
+joins in as soon as the game's first update arrives. If a device can't build the 3D house it says so and
+lets you reload and rejoin instead of leaving a blank screen.
+
 ### Host settings
 Vocabulary level (Year 3/4, Year 6/7, Year 9/10), banishments to win, game length (3–10 min),
 time to reach an entrance, words per banishment, wards, how long it stays inside, wrong-answer

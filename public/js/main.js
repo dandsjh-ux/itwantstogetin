@@ -38,6 +38,12 @@ function toast(t, ms = 2200) {
   clearTimeout(toast.t); toast.t = setTimeout(() => (el.style.display = 'none'), ms);
 }
 
+// This device's identity, so a dropped connection or a reloaded page can take its seat back
+const TOKEN = (() => { try { let t = localStorage.getItem('iwtgi_token'); if (!t) { t = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('iwtgi_token', t); } return t; } catch { return Math.random().toString(36).slice(2); } })();
+const saveSession = (code, name) => { try { localStorage.setItem('iwtgi_session', JSON.stringify({ code, name, t: Date.now() })); } catch {} };
+const clearSession = () => { try { localStorage.removeItem('iwtgi_session'); } catch {} };
+const loadSession = () => { try { const s = JSON.parse(localStorage.getItem('iwtgi_session') || 'null'); return s && Date.now() - s.t < 15 * 60 * 1000 ? s : null; } catch { return null; } };
+
 // Title screen: a knock when the hand presses the glass; sometimes she sings when she appears
 const bg = new StartScreen($('#bg'), (ev) => {
   if (S.phase !== 'menu' && S.phase !== 'lobby') return;
@@ -70,23 +76,51 @@ function nameVal() {
 }
 $('#btn-create').onclick = () => {
   const name = nameVal(); if (!name) return;
-  socket.emit('createRoom', { name }, (r) => {
+  socket.emit('createRoom', { name, token: TOKEN }, (r) => {
     if (r.error) return ($('#menu-error').textContent = r.error);
-    S.myId = r.id; S.code = r.code;
+    S.myId = r.id; S.code = r.code; S.name = name; saveSession(r.code, name);
   });
 };
-const doJoin = () => {
-  const name = nameVal(); if (!name) return;
-  const code = $('#join-code').value.trim().toUpperCase();
+const doJoin = (codeArg, nameArg) => {
+  const name = nameArg || nameVal(); if (!name) return;
+  const code = (typeof codeArg === 'string' ? codeArg : $('#join-code').value).trim().toUpperCase();
   if (code.length !== 4) return ($('#menu-error').textContent = 'Enter the 4-letter house code.');
-  socket.emit('joinRoom', { name, code }, (r) => {
+  $('#menu-error').textContent = '';
+  socket.emit('joinRoom', { name, code, token: TOKEN }, (r) => {
     if (r.error) return ($('#menu-error').textContent = r.error);
-    S.myId = r.id; S.code = r.code;
+    S.myId = r.id; S.code = r.code; S.name = name; saveSession(r.code, name);
   });
 };
-$('#btn-join').onclick = doJoin;
+$('#btn-join').onclick = () => doJoin();
 $('#join-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') doJoin(); });
 $('#name').addEventListener('keydown', (e) => { if (e.key === 'Enter') ($('#join-code').value ? doJoin() : $('#btn-create').click()); });
+
+// Houses open right now, refreshed while the menu is showing
+function renderRooms(list) {
+  const box = $('#rooms');
+  if (!list.length) box.innerHTML = '<div class="muted">No houses yet. Host one!</div>';
+  else box.innerHTML = list.map((r) => {
+    const live = r.phase !== 'lobby';
+    const state = r.phase === 'lobby' ? `Waiting · ${r.n}/${r.max}` : r.phase === 'ended' ? 'Finished' : `In the house · ${r.online}/${r.n} here`;
+    const act = live
+      ? (r.offline.length ? `<div class="rj">${r.offline.map((n) => `<button class="btn" data-rejoin="${esc(n)}" data-code="${r.code}">Rejoin as ${esc(n)}</button>`).join('')}</div>` : '<span class="muted">Started</span>')
+      : `<button class="btn" data-join="${r.code}">Join</button>`;
+    return `<div class="room-row"><b>${r.code}</b><div class="info">${esc(r.host)}'s house · ${esc(r.level)}<br>${state}</div>${act}</div>`;
+  }).join('');
+  // a game I dropped out of: offer it at the top
+  const ses = loadSession(), mine = ses && list.find((r) => r.code === ses.code && r.offline.some((n) => n.toLowerCase() === ses.name.toLowerCase()));
+  const rb = $('#rejoin-box');
+  if (mine) { rb.style.display = ''; rb.innerHTML = `You were in house <b>${mine.code}</b>. <button class="btn" id="btn-rejoin">Rejoin as ${esc(ses.name)}</button>`; $('#btn-rejoin').onclick = () => doJoin(mine.code, ses.name); }
+  else rb.style.display = 'none';
+}
+$('#rooms').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.rejoin) { $('#name').value = b.dataset.rejoin; doJoin(b.dataset.code, b.dataset.rejoin); }
+  else if (b.dataset.join) { $('#join-code').value = b.dataset.join; doJoin(b.dataset.join); }
+});
+function refreshRooms() { if (S.phase === 'menu' && socket.connected) socket.emit('listRooms', null, renderRooms); }
+setInterval(refreshRooms, 3000);
+socket.on('connect', refreshRooms);
 
 // ---------------------------------------------------------------------------
 // Lobby
@@ -164,6 +198,7 @@ function renderLobby(L) {
   $('#lobby-msg').textContent = host ? (enough ? 'Everyone in? Start when ready.' : `Waiting for at least ${L.minPlayers} players…`) : 'Waiting for the host to start the game…';
 }
 socket.on('lobby', (L) => {
+  if (L.phase !== 'lobby') return;
   S.lobby = L; S.settings = L.settings; S.hostId = L.hostId;
   if (S.phase !== 'lobby') {
     S.phase = 'lobby';
@@ -175,7 +210,7 @@ socket.on('lobby', (L) => {
 $('#btn-start').onclick = () => socket.emit('startGame', null, (r) => { if (r?.error) $('#lobby-msg').textContent = r.error; });
 $('#btn-leave').onclick = () => leaveRoom();
 function leaveRoom() {
-  socket.emit('leaveRoom');
+  socket.emit('leaveRoom'); clearSession();
   S.phase = 'menu'; S.code = null;
   endGameView();
   show('menu'); bg.start(); audio.playMusic('menu');
@@ -188,15 +223,23 @@ socket.on('gameStarting', (d) => {
   S.attackNames = new Map();
   audio.stopMusic(2);
   bg.stop();
-  if (!S.game) {
-    S.game = new Game3D(document.getElementById('game-root'), controls, { quality: opts.quality, canScare: () => S.phase === 'playing' && !S.overlay && !S.quiz });
-  } else resetGameWorld();
-  S.game.headBob = opts.bob;
-  S.game.setPlayers(d.players, S.myId);
+  try {
+    if (!S.game) {
+      S.game = new Game3D(document.getElementById('game-root'), controls, { quality: opts.quality, canScare: () => S.phase === 'playing' && !S.overlay && !S.quiz });
+    } else resetGameWorld();
+    S.game.headBob = opts.bob;
+    S.game.setPlayers(d.players, S.myId);
+  } catch (err) {
+    // the device couldn't build the 3D house: say so instead of leaving a blank screen (reloading rejoins the same seat)
+    console.error(err); S.game = null;
+    show('menu'); S.phase = 'menu';
+    $('#menu-error').textContent = 'This device could not start the 3D house. Reload the page, then rejoin from the list below.';
+    return;
+  }
   $('#rules-target').textContent = d.settings.target;
   // paint the jump-scare face now, during the cutscene, so it can't hitch when it's needed
   setTimeout(() => { jumpscare.url ||= TX.scareImage(); }, 1500);
-  runCutscene();
+  if (d.rejoin) showRules(); else runCutscene();   // someone coming back skips the story
 });
 
 function resetGameWorld() {
@@ -263,7 +306,9 @@ socket.on('readyState', (list) => {
   $('#ready-state').textContent = `${n}/${list.length} ready`;
 });
 
-socket.on('gameBegin', () => {
+socket.on('gameBegin', () => beginPlayClient());
+function beginPlayClient() {
+  if (!S.game || S.phase === 'playing') return;
   cutTimers.forEach(clearTimeout);
   S.phase = 'playing';
   show('hud');
@@ -273,7 +318,7 @@ socket.on('gameBegin', () => {
   audio.playMusic('game');
   if (!isTouch && !controls.dragMode) $('#click-to-look').style.display = 'block';
   updateWards(S.settings.wards, S.settings.wards);
-});
+}
 
 // Stream my position to the server (15 Hz)
 setInterval(() => {
@@ -296,6 +341,8 @@ function updateWards(w, total) {
 }
 
 socket.on('state', (s) => {
+  // the game is running but this device never got the word (slow tablet, missed message): join in now
+  if (S.phase === 'intro' && S.game) beginPlayClient();
   if (S.phase !== 'playing' || !S.game) return;
   S.state = s;
   S.game.applyState(s);
@@ -795,9 +842,24 @@ function endGameView() {
   $('#caught-overlay').style.display = 'none';
 }
 
-socket.on('disconnect', () => {
-  if (S.phase !== 'menu') { toast('Connection lost. Returning to the menu…', 4000); S.phase = 'menu'; endGameView(); show('menu'); bg.start(); }
+// Dropped connection: keep the game on screen and try to take the seat back as soon as we're reconnected
+let wasDisconnected = false;
+socket.on('disconnect', (reason) => {
+  if (S.phase === 'menu' || !S.code) return;
+  wasDisconnected = true;
+  toast('Connection lost. Reconnecting…', 6000);
+  if (reason === 'io server disconnect') socket.connect();
 });
+socket.on('connect', () => {
+  if (!wasDisconnected || !S.code) return;
+  wasDisconnected = false;
+  socket.emit('joinRoom', { code: S.code, name: S.name || localStorage.getItem('iwtgi_name') || 'Player', token: TOKEN }, (r) => {
+    if (r?.error) { toast(r.error, 4000); S.phase = 'menu'; S.code = null; clearSession(); endGameView(); show('menu'); bg.start(); return; }
+    S.myId = r.id; toast('Reconnected.', 2500);
+  });
+});
+// my seat was taken over by another tab or device
+socket.on('replaced', () => { S.phase = 'menu'; S.code = null; endGameView(); show('menu'); bg.start(); $('#menu-error').textContent = 'You joined from another window, so this one was closed.'; });
 
 // Test hook: only on a local dev server, never on the deployed site
 if (location.hostname === 'localhost' && new URLSearchParams(location.search).has('debug')) { window.__S = S; window.__sock = socket; }
